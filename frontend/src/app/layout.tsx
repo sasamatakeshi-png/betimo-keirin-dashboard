@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { Nav } from "@/components/nav";
 
 export const metadata: Metadata = {
   title: "Betimo KEIRIN Dashboard",
@@ -14,6 +15,7 @@ export default function RootLayout({
   return (
     <html lang="ja" className="h-full antialiased">
       <body className="min-h-full flex flex-col bg-background text-foreground">
+        <Nav />
         {children}
       </body>
     </html>
