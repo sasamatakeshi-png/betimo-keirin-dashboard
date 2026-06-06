@@ -3,6 +3,7 @@
 
 import { getToken } from "@/lib/auth";
 import type { HomeResponse } from "@/types/dashboard";
+import type { EventSummary } from "@/types/event-summary";
 import type { EventLite, Page, Video, VideoUpdate } from "@/types/video";
 
 export const API_BASE_URL =
@@ -99,6 +100,10 @@ export function getVideos(params?: QueryParams): Promise<Page<Video>> {
 
 export function getEvents(params?: QueryParams): Promise<Page<EventLite>> {
   return apiGet<Page<EventLite>>("/api/events", params);
+}
+
+export function getEventSummary(id: string): Promise<EventSummary> {
+  return apiGet<EventSummary>(`/api/events/${id}/summary`);
 }
 
 export function patchVideo(id: string, body: VideoUpdate): Promise<Video> {

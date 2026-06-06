@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import Link from "next/link";
+import { useMemo, useState, type ReactNode } from "react";
 
 import {
   formatDateTime,
@@ -19,7 +20,7 @@ interface Col {
   align: Align;
   sortable: boolean;
   sortVal?: (v: Video, raceName: string) => SortVal;
-  render: (v: Video, raceName: string) => string;
+  render: (v: Video, raceName: string) => ReactNode;
 }
 
 const metric = (key: string): ((v: Video) => number | null) =>
@@ -40,7 +41,14 @@ const COLS: Col[] = [
     align: "left",
     sortable: true,
     sortVal: (_v, race) => race,
-    render: (_v, race) => race || "—",
+    render: (v, race) =>
+      v.event_id ? (
+        <Link href={`/events/${v.event_id}`} className="text-blue-600 hover:underline">
+          {race || "—"}
+        </Link>
+      ) : (
+        race || "—"
+      ),
   },
   {
     id: "program_type",

@@ -33,6 +33,9 @@ export function Nav() {
             <Link href="/videos" className={linkCls("/videos")}>
               全データ一覧
             </Link>
+            <Link href="/events" className={linkCls("/events")}>
+              イベント
+            </Link>
           </nav>
         </div>
         <div className="text-sm">

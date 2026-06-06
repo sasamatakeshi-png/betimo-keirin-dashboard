@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatNumber } from "@/lib/format";
 import type { RecentEvent } from "@/types/dashboard";
@@ -14,9 +16,10 @@ export function RecentEventsList({ events }: { events: RecentEvent[] }) {
   return (
     <ul className="divide-y">
       {events.map((ev) => (
-        <li
+        <Link
           key={ev.id}
-          className="flex items-center justify-between gap-3 py-3"
+          href={`/events/${ev.id}`}
+          className="flex items-center justify-between gap-3 py-3 hover:bg-muted/40"
         >
           <div className="min-w-0">
             <div className="flex items-center gap-2">
@@ -37,7 +40,7 @@ export function RecentEventsList({ events }: { events: RecentEvent[] }) {
             </div>
             <div className="text-xs text-muted-foreground">番組</div>
           </div>
-        </li>
+        </Link>
       ))}
     </ul>
   );
