@@ -12,10 +12,15 @@ from app.schemas.video import VideoOut
 
 
 class Kpi(BaseModel):
-    """合計/代表値と、その算出に使った件数。値が無ければ value=None, count=0。"""
+    """合計/代表値と、その算出に使った件数。値が無ければ value=None, count=0。
+
+    期間指定時は前期間との比較も付与（未指定/比較不能なら None）。
+    """
 
     value: float | None
     count: int
+    prev_value: float | None = None
+    change_ratio: float | None = None
 
 
 class HomeKpis(BaseModel):
@@ -47,6 +52,12 @@ class IngestionStatus(BaseModel):
     completed_at: datetime | None
 
 
+class EventMarker(BaseModel):
+    date: str  # イベント開始日(JST) 'YYYY-MM-DD'
+    name: str
+    grade: str | None
+
+
 class HomeResponse(BaseModel):
     date_from: date | None
     date_to: date | None
@@ -54,6 +65,7 @@ class HomeResponse(BaseModel):
     views_trend: list[ViewsTrendPoint]
     recent_events: list[RecentEvent]
     ingestion_status: list[IngestionStatus]
+    events_markers: list[EventMarker]
 
 
 # ----- ② イベント詳細 summary -----

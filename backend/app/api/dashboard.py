@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Date, and_, cast, func, select
@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.models import Event, IngestionLog, LatestMetricValue, Video
 from app.schemas.dashboard import (
+    EventMarker,
     HomeKpis,
     HomeResponse,
     IngestionStatus,
@@ -26,6 +27,8 @@ from app.schemas.dashboard import (
     ViewsTrendPoint,
 )
 
+_KPI_KEYS = ["imp", "view_count", "subscriber_gain", "max_concurrent_viewers"]
+
 router = APIRouter(prefix="/dashboard", tags=["dashboard"])
 
 # published_at(UTC, timestamptz) → JST の日付
@@ -33,6 +36,28 @@ _JST_DATE = cast(func.timezone("Asia/Tokyo", Video.published_at), Date)
 
 # 集計対象（番組系）の基本条件
 _PROGRAM_FILTER = (Video.content_type == "regular", Video.is_competitor == False)  # noqa: E712
+
+
+def _kpi_rows(db: Session, conds: list) -> dict:
+    """指定期間条件で KPI を metric_key 別に集計し {key: Row(s/m/c)} を返す。"""
+    stmt = (
+        select(
+            LatestMetricValue.metric_key.label("k"),
+            func.sum(LatestMetricValue.value).label("s"),
+            func.max(LatestMetricValue.value).label("m"),
+            func.count().label("c"),
+        )
+        .select_from(LatestMetricValue)
+        .join(Video, Video.id == LatestMetricValue.entity_id)
+        .where(
+            LatestMetricValue.entity_type == "videos",
+            *_PROGRAM_FILTER,
+            LatestMetricValue.metric_key.in_(_KPI_KEYS),
+            *conds,
+        )
+        .group_by(LatestMetricValue.metric_key)
+    )
+    return {row.k: row for row in db.execute(stmt).all()}
 
 
 @router.get("/home", response_model=HomeResponse)
@@ -47,47 +72,35 @@ def dashboard_home(
     if date_to:
         date_conds.append(_JST_DATE <= date_to)
 
-    # ---- KPIs（期間内の合計/代表値） ----
-    kpi_stmt = (
-        select(
-            LatestMetricValue.metric_key.label("k"),
-            func.sum(LatestMetricValue.value).label("s"),
-            func.max(LatestMetricValue.value).label("m"),
-            func.count().label("c"),
-        )
-        .select_from(LatestMetricValue)
-        .join(Video, Video.id == LatestMetricValue.entity_id)
-        .where(
-            LatestMetricValue.entity_type == "videos",
-            *_PROGRAM_FILTER,
-            LatestMetricValue.metric_key.in_(
-                ["imp", "view_count", "subscriber_gain", "max_concurrent_viewers"]
-            ),
-            *date_conds,
-        )
-        .group_by(LatestMetricValue.metric_key)
-    )
-    by_key = {row.k: row for row in db.execute(kpi_stmt).all()}
+    # ---- KPIs（期間内の合計/代表値 + 前期比） ----
+    cur_by = _kpi_rows(db, date_conds)
 
-    def kpi_sum(key: str) -> Kpi:
-        r = by_key.get(key)
-        return Kpi(
-            value=float(r.s) if r is not None and r.s is not None else None,
-            count=int(r.c) if r is not None else 0,
-        )
+    # 期間指定時のみ、同じ期間長だけ前にずらした「前期間」を算出
+    prev_by: dict = {}
+    if date_from and date_to:
+        length_days = (date_to - date_from).days + 1
+        prev_to = date_from - timedelta(days=1)
+        prev_from = date_from - timedelta(days=length_days)
+        prev_by = _kpi_rows(db, [_JST_DATE >= prev_from, _JST_DATE <= prev_to])
 
-    def kpi_max(key: str) -> Kpi:
-        r = by_key.get(key)
-        return Kpi(
-            value=float(r.m) if r is not None and r.m is not None else None,
-            count=int(r.c) if r is not None else 0,
+    def build_kpi(key: str, agg: str) -> Kpi:
+        cur = cur_by.get(key)
+        prev = prev_by.get(key)
+        value = float(getattr(cur, agg)) if cur is not None and getattr(cur, agg) is not None else None
+        count = int(cur.c) if cur is not None else 0
+        prev_value = (
+            float(getattr(prev, agg)) if prev is not None and getattr(prev, agg) is not None else None
         )
+        change_ratio = None
+        if value is not None and prev_value is not None and prev_value != 0:
+            change_ratio = (value - prev_value) / prev_value
+        return Kpi(value=value, count=count, prev_value=prev_value, change_ratio=change_ratio)
 
     kpis = HomeKpis(
-        total_impressions=kpi_sum("imp"),
-        total_views=kpi_sum("view_count"),
-        total_subscriber_gain=kpi_sum("subscriber_gain"),
-        max_concurrent_viewers=kpi_max("max_concurrent_viewers"),
+        total_impressions=build_kpi("imp", "s"),
+        total_views=build_kpi("view_count", "s"),
+        total_subscriber_gain=build_kpi("subscriber_gain", "s"),
+        max_concurrent_viewers=build_kpi("max_concurrent_viewers", "m"),
     )
 
     # ---- views_trend（JST 日別の再生数推移） ----
@@ -164,6 +177,22 @@ def dashboard_home(
         for log in db.scalars(ing_stmt).all()
     ]
 
+    # ---- events_markers（期間内のイベント開始日マーカー） ----
+    marker_conds = []
+    if date_from:
+        marker_conds.append(Event.start_date >= date_from)
+    if date_to:
+        marker_conds.append(Event.start_date <= date_to)
+    marker_rows = db.execute(
+        select(Event.start_date, Event.name, Event.grade)
+        .where(Event.start_date.is_not(None), *marker_conds)
+        .order_by(Event.start_date)
+    ).all()
+    events_markers = [
+        EventMarker(date=sd.isoformat(), name=name, grade=grade)
+        for (sd, name, grade) in marker_rows
+    ]
+
     return HomeResponse(
         date_from=date_from,
         date_to=date_to,
@@ -171,4 +200,5 @@ def dashboard_home(
         views_trend=views_trend,
         recent_events=recent_events,
         ingestion_status=ingestion_status,
+        events_markers=events_markers,
     )

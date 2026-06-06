@@ -38,6 +38,18 @@ export function formatDate(iso: string | null | undefined): string {
   return `${d.getFullYear()}/${pad2(d.getMonth() + 1)}/${pad2(d.getDate())}`;
 }
 
+/** 前期比バッジ用。null は null（バッジ非表示）。 */
+export function formatChangeBadge(
+  ratio: number | null | undefined,
+): { text: string; direction: "up" | "down" | "flat" } | null {
+  if (ratio === null || ratio === undefined) return null;
+  const pct = ratio * 100;
+  const abs = Math.abs(pct).toFixed(1);
+  if (pct > 0) return { text: `▲ +${abs}%`, direction: "up" };
+  if (pct < 0) return { text: `▼ -${abs}%`, direction: "down" };
+  return { text: "± 0.0%", direction: "flat" };
+}
+
 /** 日時を "YYYY/MM/DD HH:mm" へ。 */
 export function formatDateTime(date: Date): string {
   return `${date.getFullYear()}/${pad2(date.getMonth() + 1)}/${pad2(

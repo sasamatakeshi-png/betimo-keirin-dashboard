@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getDashboardHome } from "@/lib/api";
-import { formatDateTime, formatNumber } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import type { HomeResponse } from "@/types/dashboard";
 
 type Period = "all" | "month";
@@ -129,26 +129,10 @@ function DashboardContent({ data }: { data: HomeResponse }) {
     <div className="space-y-6">
       {/* KPIカード4枚 */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiCard
-          label="インプレッション"
-          value={formatNumber(kpis.total_impressions.value)}
-          count={kpis.total_impressions.count}
-        />
-        <KpiCard
-          label="再生数"
-          value={formatNumber(kpis.total_views.value)}
-          count={kpis.total_views.count}
-        />
-        <KpiCard
-          label="登録増"
-          value={formatNumber(kpis.total_subscriber_gain.value)}
-          count={kpis.total_subscriber_gain.count}
-        />
-        <KpiCard
-          label="最大同接"
-          value={formatNumber(kpis.max_concurrent_viewers.value)}
-          count={kpis.max_concurrent_viewers.count}
-        />
+        <KpiCard label="インプレッション" kpi={kpis.total_impressions} />
+        <KpiCard label="再生数" kpi={kpis.total_views} />
+        <KpiCard label="登録増" kpi={kpis.total_subscriber_gain} />
+        <KpiCard label="最大同接（単一番組）" kpi={kpis.max_concurrent_viewers} />
       </section>
 
       {/* 再生数推移 */}
@@ -157,7 +141,10 @@ function DashboardContent({ data }: { data: HomeResponse }) {
           <CardTitle className="text-base">再生数の推移（日別・JST）</CardTitle>
         </CardHeader>
         <CardContent>
-          <ViewsTrendChart data={data.views_trend} />
+          <ViewsTrendChart
+            data={data.views_trend}
+            markers={data.events_markers}
+          />
         </CardContent>
       </Card>
 

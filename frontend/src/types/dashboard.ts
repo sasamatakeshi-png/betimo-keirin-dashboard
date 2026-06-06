@@ -3,6 +3,8 @@
 export interface Kpi {
   value: number | null;
   count: number;
+  prev_value: number | null;
+  change_ratio: number | null;
 }
 
 export interface HomeKpis {
@@ -34,6 +36,12 @@ export interface IngestionStatus {
   completed_at: string | null;
 }
 
+export interface EventMarker {
+  date: string; // 'YYYY-MM-DD'（JST, イベント開始日）
+  name: string;
+  grade: string | null;
+}
+
 export interface HomeResponse {
   date_from: string | null;
   date_to: string | null;
@@ -41,4 +49,5 @@ export interface HomeResponse {
   views_trend: ViewsTrendPoint[];
   recent_events: RecentEvent[];
   ingestion_status: IngestionStatus[];
+  events_markers: EventMarker[];
 }
