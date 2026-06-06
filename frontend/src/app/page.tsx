@@ -17,20 +17,33 @@ import { getDashboardHome } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type { HomeResponse } from "@/types/dashboard";
 
-type Period = "all" | "month";
+type Period = "all" | "lastMonth";
 
 function pad2(n: number): string {
   return n.toString().padStart(2, "0");
 }
 
-function monthParams(): { date_from: string; date_to: string } {
+// 直近の「完成した暦月」（先月）の初日〜末日。月初・年跨ぎも正しく算出。
+function lastMonthParams(): { date_from: string; date_to: string } {
   const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth() + 1;
+  const first = new Date(now.getFullYear(), now.getMonth() - 1, 1); // 先月の初日
+  const y = first.getFullYear();
+  const m = first.getMonth() + 1;
+  const lastDay = new Date(y, m, 0).getDate(); // 先月の末日
   return {
     date_from: `${y}-${pad2(m)}-01`,
-    date_to: `${y}-${pad2(m)}-${pad2(now.getDate())}`,
+    date_to: `${y}-${pad2(m)}-${pad2(lastDay)}`,
   };
+}
+
+// 'YYYY-MM-01' → 「YYYY年M月」と前月ラベル
+function monthLabels(dateFrom: string): { cur: string; prev: string } | null {
+  const mm = /^(\d{4})-(\d{2})/.exec(dateFrom);
+  if (!mm) return null;
+  const y = Number(mm[1]);
+  const mo = Number(mm[2]);
+  const prev = mo === 1 ? { y: y - 1, mo: 12 } : { y, mo: mo - 1 };
+  return { cur: `${y}年${mo}月`, prev: `${prev.y}年${prev.mo}月` };
 }
 
 export default function HomePage() {
@@ -44,7 +57,9 @@ export default function HomePage() {
     setLoading(true);
     setError(null);
     try {
-      const res = await getDashboardHome(p === "month" ? monthParams() : undefined);
+      const res = await getDashboardHome(
+        p === "lastMonth" ? lastMonthParams() : undefined,
+      );
       setData(res);
       setUpdatedAt(new Date());
     } catch (e) {
@@ -100,7 +115,7 @@ function PeriodToggle({
 }) {
   const opts: { key: Period; label: string }[] = [
     { key: "all", label: "全期間" },
-    { key: "month", label: "今月" },
+    { key: "lastMonth", label: "先月" },
   ];
   return (
     <div className="inline-flex rounded-md border p-0.5">
@@ -125,8 +140,17 @@ function PeriodToggle({
 
 function DashboardContent({ data }: { data: HomeResponse }) {
   const { kpis } = data;
+  const labels = data.date_from ? monthLabels(data.date_from) : null;
   return (
     <div className="space-y-6">
+      {/* 対象月の明示（先月表示時のみ） */}
+      {labels && (
+        <p className="-mb-2 text-sm text-muted-foreground">
+          対象: <span className="font-medium text-foreground">{labels.cur}</span>
+          （前月比 = 対 {labels.prev}）
+        </p>
+      )}
+
       {/* KPIカード4枚 */}
       <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <KpiCard label="インプレッション" kpi={kpis.total_impressions} />

@@ -9,7 +9,8 @@
 
 from __future__ import annotations
 
-from datetime import date, timedelta
+import calendar
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Date, and_, cast, func, select
@@ -36,6 +37,23 @@ _JST_DATE = cast(func.timezone("Asia/Tokyo", Video.published_at), Date)
 
 # 集計対象（番組系）の基本条件
 _PROGRAM_FILTER = (Video.content_type == "regular", Video.is_competitor == False)  # noqa: E712
+
+
+def _is_full_calendar_month(d_from: date, d_to: date) -> bool:
+    """date_from〜date_to が「ある暦月の初日〜末日」（暦月まるごと）か。"""
+    if d_from.day != 1:
+        return False
+    if d_from.year != d_to.year or d_from.month != d_to.month:
+        return False
+    last = calendar.monthrange(d_from.year, d_from.month)[1]
+    return d_to.day == last
+
+
+def _previous_calendar_month(d_from: date) -> tuple[date, date]:
+    """暦月の初日 d_from に対し、1つ前の暦月の初日・末日を返す。"""
+    y, m = (d_from.year - 1, 12) if d_from.month == 1 else (d_from.year, d_from.month - 1)
+    last = calendar.monthrange(y, m)[1]
+    return date(y, m, 1), date(y, m, last)
 
 
 def _kpi_rows(db: Session, conds: list) -> dict:
@@ -75,12 +93,11 @@ def dashboard_home(
     # ---- KPIs（期間内の合計/代表値 + 前期比） ----
     cur_by = _kpi_rows(db, date_conds)
 
-    # 期間指定時のみ、同じ期間長だけ前にずらした「前期間」を算出
+    # 暦月まるごと指定のときのみ、1つ前の暦月まるごとと比較（月途中の暴れを防ぐ）。
+    # 暦月でない任意期間・全期間は比較相手なし（prev=null）。
     prev_by: dict = {}
-    if date_from and date_to:
-        length_days = (date_to - date_from).days + 1
-        prev_to = date_from - timedelta(days=1)
-        prev_from = date_from - timedelta(days=length_days)
+    if date_from and date_to and _is_full_calendar_month(date_from, date_to):
+        prev_from, prev_to = _previous_calendar_month(date_from)
         prev_by = _kpi_rows(db, [_JST_DATE >= prev_from, _JST_DATE <= prev_to])
 
     def build_kpi(key: str, agg: str) -> Kpi:
