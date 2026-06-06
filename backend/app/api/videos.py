@@ -1,4 +1,4 @@
-"""動画 REST エンドポイント（一覧・詳細・編集）。"""
+"""動画 REST エンドポイント（一覧・比較・詳細・編集）。"""
 
 from __future__ import annotations
 
@@ -12,20 +12,42 @@ from sqlalchemy.orm import Session
 
 from app.core.db import get_db
 from app.core.security import get_current_auth
-from app.models import Event, LatestMetricValue, Video
+from app.models import Event, LatestMetricValue, MetricTimeseries, Video
 from app.schemas.common import Page, Pagination, pagination
-from app.schemas.video import VideoOut, VideoUpdate
+from app.schemas.video import (
+    CompareMetrics,
+    CompareResponse,
+    CompareVideo,
+    TimeseriesOverlay,
+    TimeseriesOverlayPoint,
+    VideoOut,
+    VideoUpdate,
+)
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
 _CONTENT_TYPES = {"regular", "short", "all"}
+_COMPARE_MAX = 10
+_COMPARE_METRIC_KEYS = [
+    "imp",
+    "view_count",
+    "subscriber_gain",
+    "unique_viewers",
+    "live_views",
+    "archive_views",
+    "avg_concurrent_viewers",
+    "max_concurrent_viewers",
+    "avg_view_duration",
+    "avg_view_percentage",
+    "repeater_ratio",
+]
 
 
 def _day_start_utc(d: date) -> datetime:
     return datetime.combine(d, time.min, tzinfo=timezone.utc)
 
 
-def _attach_metrics(db: Session, videos: list[Video]) -> None:
+def attach_metrics(db: Session, videos: list[Video]) -> None:
     """videos に最新 metric 値（latest_metric_values）を {key: value} で付与。"""
     ids = [v.id for v in videos]
     bucket: dict[UUID, dict[str, float]] = defaultdict(dict)
@@ -80,7 +102,6 @@ def list_videos(
         conds.append(Video.channel_id == channel_id)
     if content_type != "all":
         conds.append(Video.content_type == content_type)
-    # is_competitor は既定 false 絞り、指定があれば上書き
     conds.append(Video.is_competitor == (is_competitor if is_competitor is not None else False))
     if date_from:
         conds.append(Video.published_at >= _day_start_utc(date_from))
@@ -102,7 +123,7 @@ def list_videos(
     ).all()
 
     if include == "metrics":
-        _attach_metrics(db, rows)
+        attach_metrics(db, rows)
     else:
         for v in rows:
             v.metrics = None
@@ -110,12 +131,109 @@ def list_videos(
     return Page[VideoOut](items=rows, total=total, limit=page.limit, offset=page.offset)
 
 
+@router.get("/compare", response_model=CompareResponse)
+def compare_videos(
+    ids: str = Query(..., description="動画UUIDのカンマ区切り（2〜10件、上限10）"),
+    db: Session = Depends(get_db),
+) -> CompareResponse:
+    raw = [s.strip() for s in ids.split(",") if s.strip()]
+    if not raw:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="ids is required"
+        )
+    if len(raw) > _COMPARE_MAX:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"too many ids (max {_COMPARE_MAX})",
+        )
+
+    not_found: list[str] = []
+    uuid_list: list[UUID] = []
+    seen: set[str] = set()
+    for s in raw:
+        if s in seen:
+            continue
+        seen.add(s)
+        try:
+            uuid_list.append(UUID(s))
+        except ValueError:
+            not_found.append(s)  # UUID として不正 → 存在し得ない
+
+    found: dict[UUID, Video] = {}
+    if uuid_list:
+        found = {
+            v.id: v
+            for v in db.scalars(select(Video).where(Video.id.in_(uuid_list))).all()
+        }
+    for u in uuid_list:
+        if u not in found:
+            not_found.append(str(u))
+
+    found_ids = list(found.keys())
+    metrics_map: dict[UUID, dict[str, float]] = defaultdict(dict)
+    if found_ids:
+        for r in db.scalars(
+            select(LatestMetricValue).where(
+                LatestMetricValue.entity_type == "videos",
+                LatestMetricValue.entity_id.in_(found_ids),
+            )
+        ).all():
+            metrics_map[r.entity_id][r.metric_key] = float(r.value)
+
+    event_ids = {v.event_id for v in found.values() if v.event_id is not None}
+    event_names: dict[UUID, str] = {}
+    if event_ids:
+        event_names = {
+            e.id: e.name
+            for e in db.scalars(select(Event).where(Event.id.in_(event_ids))).all()
+        }
+
+    videos_out: list[CompareVideo] = []
+    overlay: list[TimeseriesOverlay] = []
+    for u in uuid_list:
+        v = found.get(u)
+        if v is None:
+            continue
+        m = metrics_map.get(u, {})
+        videos_out.append(
+            CompareVideo(
+                id=v.id,
+                title=v.title,
+                program_type=v.program_type,
+                published_at=v.published_at,
+                event_name=event_names.get(v.event_id) if v.event_id else None,
+                metrics=CompareMetrics(**{k: m.get(k) for k in _COMPARE_METRIC_KEYS}),
+            )
+        )
+        pts = db.execute(
+            select(MetricTimeseries.elapsed_seconds, MetricTimeseries.value)
+            .where(
+                MetricTimeseries.entity_type == "videos",
+                MetricTimeseries.entity_id == u,
+                MetricTimeseries.metric_key == "concurrent_viewers",
+            )
+            .order_by(MetricTimeseries.elapsed_seconds.asc())
+        ).all()
+        overlay.append(
+            TimeseriesOverlay(
+                video_id=v.id,
+                title=v.title,
+                points=[
+                    TimeseriesOverlayPoint(elapsed_seconds=p.elapsed_seconds, value=float(p.value))
+                    for p in pts
+                ],
+            )
+        )
+
+    return CompareResponse(videos=videos_out, timeseries_overlay=overlay, not_found=not_found)
+
+
 @router.get("/{video_id}", response_model=VideoOut)
 def get_video(video_id: UUID, db: Session = Depends(get_db)) -> Video:
     video = db.get(Video, video_id)
     if video is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="video not found")
-    _attach_metrics(db, [video])
+    attach_metrics(db, [video])
     return video
 
 
@@ -155,5 +273,5 @@ def update_video(
         db.commit()
         db.refresh(video)
 
-    _attach_metrics(db, [video])
+    attach_metrics(db, [video])
     return video

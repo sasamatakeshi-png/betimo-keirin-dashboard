@@ -47,3 +47,48 @@ class VideoUpdate(BaseModel):
     venue: str | None = None
     grade: str | None = None
     title_tag: str | None = None
+
+
+# ----- ③ 番組比較 -----
+
+
+class CompareMetrics(BaseModel):
+    """主要指標表。存在しない指標は null。"""
+
+    imp: float | None = None
+    view_count: float | None = None
+    subscriber_gain: float | None = None
+    unique_viewers: float | None = None
+    live_views: float | None = None
+    archive_views: float | None = None
+    avg_concurrent_viewers: float | None = None
+    max_concurrent_viewers: float | None = None
+    avg_view_duration: float | None = None
+    avg_view_percentage: float | None = None
+    repeater_ratio: float | None = None
+
+
+class CompareVideo(BaseModel):
+    id: UUID
+    title: str
+    program_type: str | None
+    published_at: datetime | None
+    event_name: str | None
+    metrics: CompareMetrics
+
+
+class TimeseriesOverlayPoint(BaseModel):
+    elapsed_seconds: int
+    value: float
+
+
+class TimeseriesOverlay(BaseModel):
+    video_id: UUID
+    title: str
+    points: list[TimeseriesOverlayPoint]
+
+
+class CompareResponse(BaseModel):
+    videos: list[CompareVideo]
+    timeseries_overlay: list[TimeseriesOverlay]
+    not_found: list[str]

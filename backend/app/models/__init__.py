@@ -1,6 +1,7 @@
 from app.models.entities import (
     Channel,
     Event,
+    IngestionLog,
     LatestMetricValue,
     MetricDefinition,
     MetricTimeseries,
@@ -16,4 +17,5 @@ __all__ = [
     "MetricValue",
     "MetricTimeseries",
     "LatestMetricValue",
+    "IngestionLog",
 ]

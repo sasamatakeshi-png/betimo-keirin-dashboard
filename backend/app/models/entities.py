@@ -117,6 +117,19 @@ class MetricTimeseries(Base):
     source = Column(Text, nullable=False)
 
 
+class IngestionLog(Base):
+    __tablename__ = "ingestion_logs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True)
+    source_type = Column(Text, nullable=False)
+    file_name = Column(Text)
+    records_processed = Column(Integer, nullable=False)
+    records_failed = Column(Integer, nullable=False)
+    status = Column(Text, nullable=False)
+    started_at = Column(DateTime(timezone=True))
+    completed_at = Column(DateTime(timezone=True))
+
+
 class LatestMetricValue(Base):
     """ビュー latest_metric_values への読み取り専用マッピング。
 
