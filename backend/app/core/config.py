@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     # Anthropic API キー（AI 層で使用）
     ANTHROPIC_API_KEY: str = ""
 
+    # AI 分析で使用する Claude モデル（既定は最新 Opus。env で上書き可）
+    ANALYSIS_MODEL: str = "claude-opus-4-8"
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",

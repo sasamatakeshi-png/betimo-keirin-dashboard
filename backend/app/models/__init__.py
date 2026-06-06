@@ -1,4 +1,6 @@
 from app.models.entities import (
+    AnalysisResult,
+    AnalysisTemplate,
     Channel,
     Event,
     IngestionLog,
@@ -18,4 +20,6 @@ __all__ = [
     "MetricTimeseries",
     "LatestMetricValue",
     "IngestionLog",
+    "AnalysisTemplate",
+    "AnalysisResult",
 ]

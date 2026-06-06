@@ -15,10 +15,14 @@ from sqlalchemy import (
     Integer,
     Numeric,
     Text,
+    text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
 
 from app.core.db import Base
+
+# ORM 経由で INSERT するテーブルの id はサーバ生成（既存スキーマの DEFAULT を利用）
+_GEN_UUID = text("gen_random_uuid()")
 
 
 class Channel(Base):
@@ -120,7 +124,7 @@ class MetricTimeseries(Base):
 class IngestionLog(Base):
     __tablename__ = "ingestion_logs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
     source_type = Column(Text, nullable=False)
     file_name = Column(Text)
     records_processed = Column(Integer, nullable=False)
@@ -128,6 +132,38 @@ class IngestionLog(Base):
     status = Column(Text, nullable=False)
     started_at = Column(DateTime(timezone=True))
     completed_at = Column(DateTime(timezone=True))
+    error_log = Column(JSONB)
+
+
+class AnalysisTemplate(Base):
+    __tablename__ = "analysis_templates"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
+    name = Column(Text, nullable=False)
+    screen_type = Column(Text)
+    prompt = Column(Text, nullable=False)
+    reference_data_keys = Column(ARRAY(Text), nullable=False)
+    comparison_target = Column(Text)
+    tone = Column(Text)
+    length = Column(Text)
+    is_default = Column(Boolean, nullable=False)
+    is_enabled = Column(Boolean, nullable=False)
+    created_by = Column(UUID(as_uuid=True))
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class AnalysisResult(Base):
+    __tablename__ = "analysis_results"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
+    template_id = Column(UUID(as_uuid=True))
+    entity_type = Column(Text)
+    entity_id = Column(UUID(as_uuid=True))
+    generated_text = Column(Text, nullable=False)
+    input_data_snapshot = Column(JSONB)
+    user_edits = Column(Text)
+    generated_at = Column(DateTime(timezone=True), nullable=False)
 
 
 class LatestMetricValue(Base):
