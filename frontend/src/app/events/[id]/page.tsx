@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
@@ -237,6 +238,7 @@ export default function EventDetailPage() {
                   <th className="px-3 py-2 text-right">平均視聴時間</th>
                   <th className="px-3 py-2 text-right">平均再生率</th>
                   <th className="px-3 py-2 text-left">動画ID</th>
+                  <th className="px-3 py-2 text-right">詳細</th>
                 </tr>
               </thead>
               <tbody>
@@ -252,6 +254,11 @@ export default function EventDetailPage() {
                       <td className="px-3 py-1.5 text-right tabular-nums">{formatDuration(m.avg_view_duration ?? null)}</td>
                       <td className="px-3 py-1.5 text-right tabular-nums">{formatPercent(m.avg_view_percentage ?? null)}</td>
                       <td className="px-3 py-1.5 text-left">{v.youtube_video_id ?? "—"}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        <Link href={`/videos/${v.id}`} className="text-blue-600 hover:underline">
+                          詳細
+                        </Link>
+                      </td>
                     </tr>
                   );
                 })}

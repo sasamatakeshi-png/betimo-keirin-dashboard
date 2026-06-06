@@ -4,7 +4,13 @@
 import { getToken } from "@/lib/auth";
 import type { HomeResponse } from "@/types/dashboard";
 import type { EventSummary } from "@/types/event-summary";
-import type { EventLite, Page, Video, VideoUpdate } from "@/types/video";
+import type {
+  EventLite,
+  Page,
+  TimeseriesPoint,
+  Video,
+  VideoUpdate,
+} from "@/types/video";
 
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
@@ -98,8 +104,27 @@ export function getVideos(params?: QueryParams): Promise<Page<Video>> {
   return apiGet<Page<Video>>("/api/videos", params);
 }
 
+export function getVideo(id: string): Promise<Video> {
+  return apiGet<Video>(`/api/videos/${id}`);
+}
+
+export function getTimeseries(
+  entityId: string,
+  metricKey: string,
+): Promise<Page<TimeseriesPoint>> {
+  return apiGet<Page<TimeseriesPoint>>("/api/timeseries", {
+    entity_id: entityId,
+    metric_key: metricKey,
+    limit: 200,
+  });
+}
+
 export function getEvents(params?: QueryParams): Promise<Page<EventLite>> {
   return apiGet<Page<EventLite>>("/api/events", params);
+}
+
+export function getEvent(id: string): Promise<EventLite> {
+  return apiGet<EventLite>(`/api/events/${id}`);
 }
 
 export function getEventSummary(id: string): Promise<EventSummary> {

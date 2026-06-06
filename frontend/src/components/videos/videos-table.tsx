@@ -160,7 +160,7 @@ export function VideosTable({
                 </th>
               ))}
               <th className="px-2 py-2 text-right font-medium text-muted-foreground">
-                編集
+                操作
               </th>
             </tr>
           </thead>
@@ -181,13 +181,21 @@ export function VideosTable({
                     </td>
                   ))}
                   <td className="px-2 py-1.5 text-right">
-                    <button
-                      type="button"
-                      onClick={() => (canEdit ? onEdit(v) : onRequireLogin())}
-                      className="rounded border px-2 py-0.5 text-xs hover:bg-muted"
-                    >
-                      編集
-                    </button>
+                    <div className="flex justify-end gap-1">
+                      <Link
+                        href={`/videos/${v.id}`}
+                        className="rounded border px-2 py-0.5 text-xs hover:bg-muted"
+                      >
+                        詳細
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={() => (canEdit ? onEdit(v) : onRequireLogin())}
+                        className="rounded border px-2 py-0.5 text-xs hover:bg-muted"
+                      >
+                        編集
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );

@@ -45,3 +45,14 @@ export interface VideoUpdate {
   grade?: string | null;
   title_tag?: string | null;
 }
+
+export interface TimeseriesPoint {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  metric_key: string;
+  elapsed_seconds: number;
+  value: number;
+  recorded_at: string | null;
+  source: string;
+}

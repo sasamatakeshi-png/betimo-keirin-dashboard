@@ -156,13 +156,20 @@ function DashboardContent({ data }: { data: HomeResponse }) {
         <KpiCard label="インプレッション" kpi={kpis.total_impressions} />
         <KpiCard label="再生数" kpi={kpis.total_views} />
         <KpiCard label="登録増" kpi={kpis.total_subscriber_gain} />
-        <KpiCard label="最大同接（単一番組）" kpi={kpis.max_concurrent_viewers} />
+        <KpiCard
+          label="最大同接（単一番組）"
+          kpi={kpis.max_concurrent_viewers}
+          note="※1番組の瞬間最大値（合計ではありません）"
+        />
       </section>
 
       {/* 再生数推移 */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">再生数の推移（日別・JST）</CardTitle>
+          <div className="flex items-baseline justify-between gap-2">
+            <CardTitle className="text-base">再生数の推移（日別・JST）</CardTitle>
+            <span className="text-xs text-muted-foreground">単位: 回（k = 千）</span>
+          </div>
         </CardHeader>
         <CardContent>
           <ViewsTrendChart

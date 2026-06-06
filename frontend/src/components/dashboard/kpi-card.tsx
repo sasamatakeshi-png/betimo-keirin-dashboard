@@ -9,18 +9,33 @@ const BADGE_STYLE: Record<string, string> = {
   flat: "bg-muted text-muted-foreground border",
 };
 
-export function KpiCard({ label, kpi }: { label: string; kpi: Kpi }) {
+export function KpiCard({
+  label,
+  kpi,
+  note,
+}: {
+  label: string;
+  kpi: Kpi;
+  note?: string;
+}) {
   const badge = formatChangeBadge(kpi.change_ratio);
 
   return (
     // 自社データ=青系（設計方針）。左アクセントで意味を示す。
     <Card className="border-l-4 border-l-blue-500">
       <CardContent className="px-5 py-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="text-sm text-muted-foreground">{label}</div>
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="text-sm text-muted-foreground">{label}</div>
+            {note && (
+              <div className="mt-0.5 text-[10px] leading-tight text-muted-foreground/80">
+                {note}
+              </div>
+            )}
+          </div>
           {badge && (
             <span
-              className={`rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${
+              className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${
                 BADGE_STYLE[badge.direction]
               }`}
             >
@@ -28,7 +43,7 @@ export function KpiCard({ label, kpi }: { label: string; kpi: Kpi }) {
             </span>
           )}
         </div>
-        <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">
+        <div className="mt-2 text-3xl font-bold tabular-nums tracking-tight">
           {formatNumber(kpi.value)}
         </div>
         <div className="mt-1 text-xs text-muted-foreground">

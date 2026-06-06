@@ -81,6 +81,7 @@ export function ViewsTrendChart({
           tick={{ fontSize: 12, fill: "#71717a" }}
           tickLine={false}
           axisLine={{ stroke: "#e4e4e7" }}
+          tickMargin={8}
           minTickGap={28}
         />
         <YAxis
@@ -88,7 +89,8 @@ export function ViewsTrendChart({
           tick={{ fontSize: 12, fill: "#71717a" }}
           tickLine={false}
           axisLine={false}
-          width={48}
+          tickMargin={6}
+          width={52}
         />
         <Tooltip content={<ChartTooltip />} />
         {shown.map((m) => (
