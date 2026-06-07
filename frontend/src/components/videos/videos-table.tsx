@@ -28,6 +28,22 @@ const metric = (key: string): ((v: Video) => number | null) =>
 
 const COLS: Col[] = [
   {
+    // 行頭の独立した詳細ボタン列（番組詳細へ。レース名セル=イベントへと役割分担）
+    id: "detail_link",
+    label: "",
+    align: "left",
+    sortable: false,
+    render: (v) => (
+      <Link
+        href={`/videos/${v.id}`}
+        title="番組詳細へ"
+        className="rounded border px-2 py-0.5 text-xs hover:bg-muted"
+      >
+        詳細
+      </Link>
+    ),
+  },
+  {
     id: "published_at",
     label: "日時",
     align: "left",
