@@ -4,6 +4,9 @@
 *.env
 !.env.example
 
+# ---- 取り込み元データ（競合の生データ等を含むためコミットしない） ----
+backend/data/
+
 # ---- Python ----
 __pycache__/
 *.py[cod]

@@ -111,7 +111,7 @@ class MetricValue(Base):
 class MetricTimeseries(Base):
     __tablename__ = "metric_timeseries"
 
-    id = Column(UUID(as_uuid=True), primary_key=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
     entity_type = Column(Text, nullable=False)
     entity_id = Column(UUID(as_uuid=True), nullable=False)
     metric_key = Column(Text, nullable=False)
