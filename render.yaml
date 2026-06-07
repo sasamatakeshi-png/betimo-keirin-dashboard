@@ -1,0 +1,26 @@
+# Render Blueprint — バックエンド(FastAPI)のみデプロイ。DB は既存 Supabase を継続利用。
+# 秘密情報はここに書かない。sync: false の変数は Render ダッシュボードで手入力する。
+services:
+  - type: web
+    name: betimo-keirin-backend
+    runtime: python
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      # Python バージョン固定（ローカルは 3.14.x。秘密情報ではないため値を直書き）
+      - key: PYTHON_VERSION
+        value: 3.14.3
+      # 以下はすべて Render ダッシュボードで手入力（実値はコミットしない）
+      - key: DATABASE_URL # Supabase Session pooler の接続文字列 (postgresql+psycopg://...)
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: FRONTEND_ORIGIN # 本番では Vercel の URL (例: https://xxxx.vercel.app)
+        sync: false
+      - key: ANALYSIS_MODEL # 例: claude-opus-4-8（コード側デフォルトと同じ）
+        sync: false

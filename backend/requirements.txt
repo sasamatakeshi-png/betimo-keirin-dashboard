@@ -10,4 +10,4 @@ openpyxl
 pdfplumber
 anthropic
 python-pptx
-playwright
+# playwright は Phase 2 レポート出力用 → requirements-report.txt に分離（本番起動に不要・ビルド軽量化）

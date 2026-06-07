@@ -1,0 +1,3 @@
+# Phase 2 レポート出力（PDF/スクリーンショット）用の依存。本番 API の起動には不要。
+# 使用時: pip install -r requirements-report.txt && playwright install chromium
+playwright
