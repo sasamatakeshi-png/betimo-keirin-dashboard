@@ -4,6 +4,7 @@
 import { getToken } from "@/lib/auth";
 import type { HomeResponse } from "@/types/dashboard";
 import type { EventSummary } from "@/types/event-summary";
+import type { IngestionLog, IngestType, UploadResult } from "@/types/ingestion";
 import type {
   Channel,
   EventLite,
@@ -27,7 +28,11 @@ export class ApiError extends Error {
 
 type QueryParams = Record<string, string | number | undefined | null>;
 
-export async function apiGet<T>(path: string, params?: QueryParams): Promise<T> {
+export async function apiGet<T>(
+  path: string,
+  params?: QueryParams,
+  opts?: { auth?: boolean },
+): Promise<T> {
   const url = new URL(path, API_BASE_URL);
   if (params) {
     for (const [key, value] of Object.entries(params)) {
@@ -37,11 +42,15 @@ export async function apiGet<T>(path: string, params?: QueryParams): Promise<T> 
     }
   }
 
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (opts?.auth) {
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+
   let res: Response;
   try {
-    res = await fetch(url.toString(), {
-      headers: { Accept: "application/json" },
-    });
+    res = await fetch(url.toString(), { headers });
   } catch {
     throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
   }
@@ -138,4 +147,44 @@ export function getEventSummary(id: string): Promise<EventSummary> {
 
 export function patchVideo(id: string, body: VideoUpdate): Promise<Video> {
   return apiPatch<Video>(`/api/videos/${id}`, body);
+}
+
+// --- 取り込み（要ログイン） ---
+
+export async function uploadIngestionCsv(
+  file: File,
+  type: IngestType,
+): Promise<UploadResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("type", type);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/ingestion/upload", API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as UploadResult;
+}
+
+export function getIngestionLogs(): Promise<Page<IngestionLog>> {
+  return apiGet<Page<IngestionLog>>("/api/ingestion/logs", { limit: 20 }, { auth: true });
 }

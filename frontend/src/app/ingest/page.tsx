@@ -1,0 +1,293 @@
+"use client";
+
+// データ取り込み: 全期間CSV / 90日CSV をアップロードして metric_values へ投入し、
+// 取り込み履歴(ingestion_logs)を表示する。投入は要ログイン（編集権限）。
+
+import { useCallback, useEffect, useState } from "react";
+
+import { LoginDialog } from "@/components/auth/login-dialog";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ApiError, getIngestionLogs, uploadIngestionCsv } from "@/lib/api";
+import { useAuth } from "@/lib/auth";
+import { formatDateTime, formatNumber } from "@/lib/format";
+import type { IngestionLog, IngestType, UploadResult } from "@/types/ingestion";
+
+const TYPE_OPTIONS: { value: IngestType; label: string; hint: string }[] = [
+  { value: "zenkikan_csv", label: "全期間CSV", hint: "imp / 再生数 / 登録数 / 平均視聴時間 / 平均再生率" },
+  { value: "90d_csv", label: "90日CSV", hint: "UU数 / 新規・リピーター / リピーター比率" },
+];
+
+const STATUS_BADGE: Record<string, string> = {
+  success: "bg-green-50 text-green-700",
+  partial: "bg-amber-50 text-amber-700",
+  failed: "bg-red-50 text-red-600",
+};
+
+export default function IngestPage() {
+  const { canEdit, authRequired, probed } = useAuth();
+
+  const [type, setType] = useState<IngestType>("zenkikan_csv");
+  const [file, setFile] = useState<File | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [result, setResult] = useState<UploadResult | null>(null);
+  const [resultFile, setResultFile] = useState<string | null>(null);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [loginOpen, setLoginOpen] = useState(false);
+
+  const [logs, setLogs] = useState<IngestionLog[]>([]);
+  const [logsError, setLogsError] = useState<string | null>(null);
+  const [logsLoading, setLogsLoading] = useState(true);
+
+  // setState は Promise コールバック内のみ（effect 本体での同期 setState を避ける）
+  const loadLogs = useCallback(
+    () =>
+      getIngestionLogs()
+        .then((p) => {
+          setLogs(p.items);
+          setLogsError(null);
+        })
+        .catch((e) => {
+          if (e instanceof ApiError && e.status === 401) {
+            setLogsError("ログインすると取り込み履歴を表示できます");
+          } else {
+            setLogsError(e instanceof Error ? e.message : "履歴の取得に失敗しました");
+          }
+        })
+        .finally(() => setLogsLoading(false)),
+    [],
+  );
+
+  // 認証判定が済んでから履歴を取得（要トークンのため）
+  useEffect(() => {
+    if (probed) void loadLogs();
+  }, [probed, canEdit, loadLogs]);
+
+  async function handleUpload() {
+    if (!file || !canEdit || uploading) return;
+    setUploading(true);
+    setUploadError(null);
+    setResult(null);
+    try {
+      const r = await uploadIngestionCsv(file, type);
+      setResult(r);
+      setResultFile(file.name);
+      setFile(null);
+      setLogsLoading(true);
+      void loadLogs();
+    } catch (e) {
+      setUploadError(e instanceof Error ? e.message : "アップロードに失敗しました");
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function pickFile(f: File | undefined | null) {
+    if (f) {
+      setFile(f);
+      setResult(null);
+      setUploadError(null);
+    }
+  }
+
+  return (
+    <main className="mx-auto w-full max-w-4xl space-y-6 px-6 py-8">
+      <header>
+        <h1 className="text-2xl font-bold tracking-tight">データ取り込み</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          YouTube Studio のCSVをアップロードして番組データへ投入します（同接xlsxは次段階で対応）
+        </p>
+      </header>
+
+      {/* アップロード */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">CSVアップロード</CardTitle>
+          {authRequired === true && !canEdit && (
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* 種別選択 */}
+          <div className="flex flex-wrap gap-3">
+            {TYPE_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm ${
+                  type === opt.value ? "border-blue-500 bg-blue-50/50" : "hover:bg-muted/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="ingest-type"
+                  checked={type === opt.value}
+                  onChange={() => setType(opt.value)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">{opt.label}</span>
+                  <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          {/* ファイル選択（クリック or ドラッグ&ドロップ） */}
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragOver(true);
+            }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(false);
+              pickFile(e.dataTransfer.files?.[0]);
+            }}
+            className={`flex h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm ${
+              dragOver ? "border-blue-400 bg-blue-50/50" : "border-muted-foreground/25 hover:bg-muted/30"
+            }`}
+          >
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                pickFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            {file ? (
+              <>
+                <span className="font-medium">{file.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {formatNumber(file.size)} バイト — クリックで選び直し
+                </span>
+              </>
+            ) : (
+              <>
+                <span>CSVファイルをドロップ、またはクリックして選択</span>
+                <span className="text-xs text-muted-foreground">.csv（UTF-8 / Shift_JIS 両対応）</span>
+              </>
+            )}
+          </label>
+
+          {/* 実行 */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleUpload()}
+              disabled={!file || !canEdit || uploading}
+              className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {uploading ? "投入中…" : "取り込み実行"}
+            </button>
+            {!canEdit && probed && (
+              <span className="text-xs text-muted-foreground">投入にはログインが必要です</span>
+            )}
+            <span className="text-xs text-muted-foreground">
+              ファイルは投入処理にのみ使用し、サーバには保存されません。同じファイルを再投入しても重複しません。
+            </span>
+          </div>
+
+          {/* 結果 / エラー */}
+          {uploadError && (
+            <div className="rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600">
+              {uploadError}
+            </div>
+          )}
+          {result && (
+            <div className="rounded-md border border-green-200 bg-green-50/50 p-3 text-sm">
+              <div className="font-medium text-green-800">取り込み完了{resultFile ? `: ${resultFile}` : ""}</div>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>投入 {formatNumber(result.inserted)} 件</span>
+                <span>スキップ(重複等) {formatNumber(result.skipped)} 件</span>
+                <span>紐づいた番組 {formatNumber(result.matched_videos)} 本</span>
+                <span className={result.unmatched > 0 ? "text-amber-700" : ""}>
+                  未マッチ {formatNumber(result.unmatched)} 行
+                </span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 取り込み履歴 */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">取り込み履歴</CardTitle>
+          <button
+            type="button"
+            onClick={() => {
+              setLogsLoading(true);
+              void loadLogs();
+            }}
+            disabled={logsLoading}
+            className="rounded border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50"
+          >
+            更新
+          </button>
+        </CardHeader>
+        <CardContent>
+          {logsError ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">{logsError}</div>
+          ) : logsLoading && logs.length === 0 ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">読み込み中…</div>
+          ) : logs.length === 0 ? (
+            <div className="py-6 text-center text-sm text-muted-foreground">取り込み履歴はまだありません</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs text-muted-foreground">
+                    <th className="px-2 py-2 font-medium">日時</th>
+                    <th className="px-2 py-2 font-medium">ファイル名</th>
+                    <th className="px-2 py-2 font-medium">種別</th>
+                    <th className="px-2 py-2 text-right font-medium">処理件数</th>
+                    <th className="px-2 py-2 text-right font-medium">失敗</th>
+                    <th className="px-2 py-2 font-medium">状態</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {logs.map((l) => {
+                    const at = l.completed_at ?? l.started_at;
+                    return (
+                      <tr key={l.id} className="border-b last:border-0">
+                        <td className="px-2 py-2 whitespace-nowrap tabular-nums">
+                          {at ? formatDateTime(new Date(at)) : "—"}
+                        </td>
+                        <td className="max-w-[260px] truncate px-2 py-2" title={l.file_name ?? undefined}>
+                          {l.file_name ?? "—"}
+                        </td>
+                        <td className="px-2 py-2">{l.source_type}</td>
+                        <td className="px-2 py-2 text-right tabular-nums">
+                          {formatNumber(l.records_processed)}
+                        </td>
+                        <td className={`px-2 py-2 text-right tabular-nums ${l.records_failed > 0 ? "text-amber-700" : ""}`}>
+                          {formatNumber(l.records_failed)}
+                        </td>
+                        <td className="px-2 py-2">
+                          <span className={`rounded px-1.5 py-0.5 text-xs ${STATUS_BADGE[l.status] ?? "bg-muted text-muted-foreground"}`}>
+                            {l.status}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} />
+    </main>
+  );
+}

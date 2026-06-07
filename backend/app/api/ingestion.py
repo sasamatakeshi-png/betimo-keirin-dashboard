@@ -7,6 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
+from app.core.security import get_current_auth
 from app.models import IngestionLog
 from app.schemas.common import Page, Pagination, pagination
 from app.schemas.ingestion import IngestionLogOut, UploadResult
@@ -15,7 +16,11 @@ from app.services.ingestion import INGEST_TYPES, ingest_csv
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 
 
-@router.post("/upload", response_model=UploadResult)
+@router.post(
+    "/upload",
+    response_model=UploadResult,
+    dependencies=[Depends(get_current_auth)],
+)
 async def upload_csv(
     file: UploadFile = File(...),
     type: str = Form(..., description="zenkikan_csv | 90d_csv"),
@@ -35,7 +40,11 @@ async def upload_csv(
     return UploadResult(**result)
 
 
-@router.get("/logs", response_model=Page[IngestionLogOut])
+@router.get(
+    "/logs",
+    response_model=Page[IngestionLogOut],
+    dependencies=[Depends(get_current_auth)],
+)
 def list_logs(
     page: Pagination = Depends(pagination),
     db: Session = Depends(get_db),

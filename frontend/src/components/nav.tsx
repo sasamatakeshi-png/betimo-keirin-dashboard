@@ -39,6 +39,9 @@ export function Nav() {
             <Link href="/concurrent-analysis" className={linkCls("/concurrent-analysis")}>
               同接分析
             </Link>
+            <Link href="/ingest" className={linkCls("/ingest")}>
+              取り込み
+            </Link>
           </nav>
         </div>
         <div className="text-sm">
