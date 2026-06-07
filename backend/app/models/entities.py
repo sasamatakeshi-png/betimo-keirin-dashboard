@@ -28,7 +28,7 @@ _GEN_UUID = text("gen_random_uuid()")
 class Channel(Base):
     __tablename__ = "channels"
 
-    id = Column(UUID(as_uuid=True), primary_key=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
     youtube_channel_id = Column(Text, nullable=False)
     name = Column(Text, nullable=False)
     handle = Column(Text)
@@ -57,7 +57,7 @@ class Event(Base):
 class Video(Base):
     __tablename__ = "videos"
 
-    id = Column(UUID(as_uuid=True), primary_key=True)
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
     youtube_video_id = Column(Text)
     channel_id = Column(UUID(as_uuid=True), ForeignKey("channels.id"), nullable=False)
     event_id = Column(UUID(as_uuid=True), ForeignKey("events.id"))
