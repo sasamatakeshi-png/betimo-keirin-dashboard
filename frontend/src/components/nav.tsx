@@ -36,6 +36,9 @@ export function Nav() {
             <Link href="/events" className={linkCls("/events")}>
               イベント
             </Link>
+            <Link href="/concurrent-analysis" className={linkCls("/concurrent-analysis")}>
+              同接分析
+            </Link>
           </nav>
         </div>
         <div className="text-sm">

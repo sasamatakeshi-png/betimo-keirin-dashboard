@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.analysis import router as analysis_router
 from app.api.auth import router as auth_router
 from app.core.config import settings
+from app.api.channels import router as channels_router
 from app.api.dashboard import router as dashboard_router
 from app.api.events import router as events_router
 from app.api.health import router as health_router
@@ -36,6 +37,7 @@ app.include_router(health_router)
 
 # 業務 API は /api 配下
 app.include_router(auth_router, prefix="/api")
+app.include_router(channels_router, prefix="/api")
 app.include_router(dashboard_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(videos_router, prefix="/api")

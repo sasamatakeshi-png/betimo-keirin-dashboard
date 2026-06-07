@@ -5,6 +5,7 @@ import { getToken } from "@/lib/auth";
 import type { HomeResponse } from "@/types/dashboard";
 import type { EventSummary } from "@/types/event-summary";
 import type {
+  Channel,
   EventLite,
   Page,
   TimeseriesPoint,
@@ -117,6 +118,10 @@ export function getTimeseries(
     metric_key: metricKey,
     limit: 200,
   });
+}
+
+export function getChannels(): Promise<Page<Channel>> {
+  return apiGet<Page<Channel>>("/api/channels", { limit: 50 });
 }
 
 export function getEvents(params?: QueryParams): Promise<Page<EventLite>> {

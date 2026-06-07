@@ -46,6 +46,16 @@ export interface VideoUpdate {
   title_tag?: string | null;
 }
 
+export interface Channel {
+  id: string;
+  youtube_channel_id: string;
+  name: string;
+  handle: string | null;
+  is_own: boolean;
+  is_default_competitor: boolean;
+  is_enabled: boolean;
+}
+
 export interface TimeseriesPoint {
   id: string;
   entity_type: string;

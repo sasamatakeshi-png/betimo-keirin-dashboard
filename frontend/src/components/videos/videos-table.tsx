@@ -188,6 +188,12 @@ export function VideosTable({
                       >
                         詳細
                       </Link>
+                      <Link
+                        href={`/concurrent-analysis?ids=${v.id}`}
+                        className="rounded border px-2 py-0.5 text-xs hover:bg-muted"
+                      >
+                        同接
+                      </Link>
                       <button
                         type="button"
                         onClick={() => (canEdit ? onEdit(v) : onRequireLogin())}

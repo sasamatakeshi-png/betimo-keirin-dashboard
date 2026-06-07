@@ -179,8 +179,14 @@ export default function VideoDetailPage() {
 
       {/* c. 同接×チャット 時系列 */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">同接・チャット 時系列</CardTitle>
+          <Link
+            href={`/concurrent-analysis?ids=${video.id}`}
+            className="text-sm text-blue-600 hover:underline"
+          >
+            同接分析で比較 →
+          </Link>
         </CardHeader>
         <CardContent>
           {tsData.length === 0 ? (
