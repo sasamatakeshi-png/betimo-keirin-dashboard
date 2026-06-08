@@ -14,6 +14,8 @@ class UploadResult(BaseModel):
     skipped: int
     matched_videos: int
     unmatched: int
+    # ショート取り込みで新規作成した video 本数（通常CSVでは常に 0）
+    created: int = 0
     log_id: UUID
 
 

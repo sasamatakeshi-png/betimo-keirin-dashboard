@@ -13,6 +13,7 @@ from app.services.parsers.common import (
     find_col,
     is_skip_identifier,
     parse_count,
+    parse_datetime_jst,
     parse_duration_seconds,
     parse_percent_ratio,
     read_rows,
@@ -114,3 +115,98 @@ def parse_90d_csv(content: bytes) -> list[dict]:
             "repeater_ratio": (["リピーター比率", "リピート率", "リピーター率"], ()),
         },
     )
+
+
+# ショート用 CSV（全期間 / 90日とも同一列構成）の列→指標マッピング。
+# 通常CSVと違い、video の新規作成に使う title / 公開時刻 / 長さ も抽出する。
+_SHORT_COUNT_COLS: dict[str, tuple[list[str], tuple[str, ...]]] = {
+    "view_count": (["視聴回数", "再生数", "views"], ("率", "維持", "平均")),
+    "subscriber_gain": (["チャンネル登録", "登録"], ()),
+    "imp": (["インプレッション", "imp"], ()),
+    "unique_viewers": (["ユニーク視聴者", "ユニーク", "unique"], ()),
+    "new_viewers": (["新しい視聴者", "新規"], ()),
+    "repeat_viewers": (["リピーター"], ("比率", "率", "ratio")),
+}
+_SHORT_DURATION_COLS: dict[str, tuple[list[str], tuple[str, ...]]] = {
+    "avg_view_duration": (["平均視聴時間", "視聴時間"], ("率",)),
+}
+_SHORT_PERCENT_COLS: dict[str, tuple[list[str], tuple[str, ...]]] = {
+    "avg_view_percentage": (["平均視聴率", "視聴維持率", "維持率", "再生率"], ()),
+}
+
+
+def parse_short_csv(content: bytes) -> list[dict]:
+    """ショートCSV（全期間/90日 共通列）をパースする。
+
+    返り値（通常パーサより情報が多い）:
+        [{ "identifier": <youtube_video_id>, "title": str|None,
+           "published_at": datetime|None, "duration_seconds": int|None,
+           "metrics": { metric_key: value, ... } }, ...]
+    - 合計行・空 identifier はスキップ。公開時刻が空の行は弾かず published_at=None。
+    - 全期間CSVは new_viewers/repeat_viewers が空欄 → 当該 metric は付与されない（null≠0）。
+    """
+    text = decode_csv_bytes(content)
+    rows = read_rows(text)
+    if not rows:
+        return []
+
+    headers_lower = [h.strip().lower() for h in rows[0]]
+
+    id_idx = find_col(headers_lower, ID_KEYWORDS)
+    if id_idx is None:
+        id_idx = 0
+    title_idx = find_col(headers_lower, ["動画のタイトル", "タイトル", "title"])
+    published_idx = find_col(headers_lower, ["公開", "published"])
+    # 動画の長さ。「平均視聴時間」と区別するため平均/視聴を除外
+    length_idx = find_col(headers_lower, ["長さ", "duration"], ("平均", "視聴"))
+
+    def resolve(spec: dict[str, tuple[list[str], tuple[str, ...]]]) -> dict[str, int]:
+        out: dict[str, int] = {}
+        for key, (inc, exc) in spec.items():
+            idx = find_col(headers_lower, inc, exc)
+            if idx is not None:
+                out[key] = idx
+        return out
+
+    count_idx = resolve(_SHORT_COUNT_COLS)
+    dur_idx = resolve(_SHORT_DURATION_COLS)
+    pct_idx = resolve(_SHORT_PERCENT_COLS)
+
+    def cell(row: list[str], idx: int | None) -> str | None:
+        if idx is None or idx >= len(row):
+            return None
+        return row[idx]
+
+    records: list[dict] = []
+    for row in rows[1:]:
+        if not row or id_idx >= len(row):
+            continue
+        identifier = (row[id_idx] or "").strip()
+        if is_skip_identifier(identifier):
+            continue
+
+        metrics: dict[str, float | int] = {}
+        for key, idx in count_idx.items():
+            v = parse_count(cell(row, idx))
+            if v is not None:
+                metrics[key] = v
+        for key, idx in dur_idx.items():
+            v = parse_duration_seconds(cell(row, idx))
+            if v is not None:
+                metrics[key] = v
+        for key, idx in pct_idx.items():
+            v = parse_percent_ratio(cell(row, idx))
+            if v is not None:
+                metrics[key] = v
+
+        title_raw = cell(row, title_idx)
+        records.append(
+            {
+                "identifier": identifier,
+                "title": title_raw.strip() if title_raw else None,
+                "published_at": parse_datetime_jst(cell(row, published_idx)),
+                "duration_seconds": parse_duration_seconds(cell(row, length_idx)),
+                "metrics": metrics,
+            }
+        )
+    return records

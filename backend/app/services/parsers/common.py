@@ -4,6 +4,10 @@ from __future__ import annotations
 
 import csv
 import io
+from datetime import datetime, timedelta, timezone
+
+# JST（YouTube Studio の公開時刻は JST 表記。UTC へ正規化して格納する）
+_JST = timezone(timedelta(hours=9))
 
 # 動画識別子列（共通）
 ID_KEYWORDS = ["動画id", "コンテンツ", "動画", "content", "video"]
@@ -92,3 +96,41 @@ def parse_percent_ratio(raw: str | None) -> float | None:
     if had_percent or v > 1:
         v = v / 100.0
     return v
+
+
+def parse_datetime_jst(raw: str | None) -> datetime | None:
+    """公開時刻文字列 → UTC の aware datetime。空欄・解釈不能は None（行は弾かない）。
+
+    - タイムゾーン付き ISO（末尾 Z / +09:00 等）はその情報を尊重して UTC へ変換。
+    - タイムゾーン無しは JST とみなして UTC へ変換。
+    - "YYYY/MM/DD HH:MM(:SS)" / "YYYY-MM-DD ..." / 日付のみ も許容。
+    """
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if s == "" or s in ("-", "—"):
+        return None
+
+    # ISO 8601（fromisoformat は 3.11+ で末尾 Z・空白区切りを許容）
+    try:
+        iso = s[:-1] + "+00:00" if s.endswith("Z") else s
+        dt = datetime.fromisoformat(iso)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_JST)
+        return dt.astimezone(timezone.utc)
+    except ValueError:
+        pass
+
+    for fmt in (
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%Y/%m/%d",
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y-%m-%d",
+    ):
+        try:
+            return datetime.strptime(s, fmt).replace(tzinfo=_JST).astimezone(timezone.utc)
+        except ValueError:
+            continue
+    return None

@@ -7,14 +7,29 @@ import { useCallback, useEffect, useState } from "react";
 
 import { LoginDialog } from "@/components/auth/login-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ApiError, getIngestionLogs, uploadIngestionCsv } from "@/lib/api";
+import {
+  ApiError,
+  getIngestionLogs,
+  uploadIngestionCsv,
+  uploadShortCsv,
+} from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatDateTime, formatNumber } from "@/lib/format";
-import type { IngestionLog, IngestType, UploadResult } from "@/types/ingestion";
+import type {
+  IngestionLog,
+  IngestType,
+  ShortIngestType,
+  UploadResult,
+} from "@/types/ingestion";
 
 const TYPE_OPTIONS: { value: IngestType; label: string; hint: string }[] = [
   { value: "zenkikan_csv", label: "全期間CSV", hint: "imp / 再生数 / 登録数 / 平均視聴時間 / 平均再生率" },
   { value: "90d_csv", label: "90日CSV", hint: "UU数 / 新規・リピーター / リピーター比率" },
+];
+
+const SHORT_TYPE_OPTIONS: { value: ShortIngestType; label: string; hint: string }[] = [
+  { value: "short_zenkikan_csv", label: "ショート全期間CSV", hint: "未登録IDは新規ショートとして作成。新規/リピーターは空欄" },
+  { value: "short_90d_csv", label: "ショート90日CSV", hint: "未登録IDは新規ショートとして作成。UU/新規/リピーターあり" },
 ];
 
 const STATUS_BADGE: Record<string, string> = {
@@ -34,6 +49,15 @@ export default function IngestPage() {
   const [resultFile, setResultFile] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [loginOpen, setLoginOpen] = useState(false);
+
+  // ショートCSV（独立した投入口。通常CSVの state とは分離）
+  const [shortType, setShortType] = useState<ShortIngestType>("short_zenkikan_csv");
+  const [shortFile, setShortFile] = useState<File | null>(null);
+  const [shortDragOver, setShortDragOver] = useState(false);
+  const [shortUploading, setShortUploading] = useState(false);
+  const [shortResult, setShortResult] = useState<UploadResult | null>(null);
+  const [shortResultFile, setShortResultFile] = useState<string | null>(null);
+  const [shortError, setShortError] = useState<string | null>(null);
 
   const [logs, setLogs] = useState<IngestionLog[]>([]);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -87,6 +111,33 @@ export default function IngestPage() {
       setFile(f);
       setResult(null);
       setUploadError(null);
+    }
+  }
+
+  async function handleUploadShort() {
+    if (!shortFile || !canEdit || shortUploading) return;
+    setShortUploading(true);
+    setShortError(null);
+    setShortResult(null);
+    try {
+      const r = await uploadShortCsv(shortFile, shortType);
+      setShortResult(r);
+      setShortResultFile(shortFile.name);
+      setShortFile(null);
+      setLogsLoading(true);
+      void loadLogs();
+    } catch (e) {
+      setShortError(e instanceof Error ? e.message : "アップロードに失敗しました");
+    } finally {
+      setShortUploading(false);
+    }
+  }
+
+  function pickShortFile(f: File | undefined | null) {
+    if (f) {
+      setShortFile(f);
+      setShortResult(null);
+      setShortError(null);
     }
   }
 
@@ -211,6 +262,127 @@ export default function IngestPage() {
                 <span>紐づいた番組 {formatNumber(result.matched_videos)} 本</span>
                 <span className={result.unmatched > 0 ? "text-amber-700" : ""}>
                   未マッチ {formatNumber(result.unmatched)} 行
+                </span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ショートCSVアップロード（通常CSVとは独立） */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">ショートCSVアップロード</CardTitle>
+          {authRequired === true && !canEdit && (
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            ショート専用CSV。未登録の動画IDは新規ショート（content_type=short）として作成し、既存IDには数値のみ付与します。
+          </p>
+
+          {/* 種別選択 */}
+          <div className="flex flex-wrap gap-3">
+            {SHORT_TYPE_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm ${
+                  shortType === opt.value ? "border-blue-500 bg-blue-50/50" : "hover:bg-muted/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="short-ingest-type"
+                  checked={shortType === opt.value}
+                  onChange={() => setShortType(opt.value)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">{opt.label}</span>
+                  <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          {/* ファイル選択 */}
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setShortDragOver(true);
+            }}
+            onDragLeave={() => setShortDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setShortDragOver(false);
+              pickShortFile(e.dataTransfer.files?.[0]);
+            }}
+            className={`flex h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm ${
+              shortDragOver ? "border-blue-400 bg-blue-50/50" : "border-muted-foreground/25 hover:bg-muted/30"
+            }`}
+          >
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                pickShortFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            {shortFile ? (
+              <>
+                <span className="font-medium">{shortFile.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {formatNumber(shortFile.size)} バイト — クリックで選び直し
+                </span>
+              </>
+            ) : (
+              <>
+                <span>ショートCSVをドロップ、またはクリックして選択</span>
+                <span className="text-xs text-muted-foreground">.csv（UTF-8 / Shift_JIS 両対応）</span>
+              </>
+            )}
+          </label>
+
+          {/* 実行 */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleUploadShort()}
+              disabled={!shortFile || !canEdit || shortUploading}
+              className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {shortUploading ? "投入中…" : "ショート取り込み実行"}
+            </button>
+            {!canEdit && probed && (
+              <span className="text-xs text-muted-foreground">投入にはログインが必要です</span>
+            )}
+          </div>
+
+          {/* 結果 / エラー */}
+          {shortError && (
+            <div className="rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600">
+              {shortError}
+            </div>
+          )}
+          {shortResult && (
+            <div className="rounded-md border border-green-200 bg-green-50/50 p-3 text-sm">
+              <div className="font-medium text-green-800">取り込み完了{shortResultFile ? `: ${shortResultFile}` : ""}</div>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>新規作成 {formatNumber(shortResult.created ?? 0)} 本</span>
+                <span>投入 {formatNumber(shortResult.inserted)} 件</span>
+                <span>スキップ(重複等) {formatNumber(shortResult.skipped)} 件</span>
+                <span>対象ショート {formatNumber(shortResult.matched_videos)} 本</span>
+                <span className={shortResult.unmatched > 0 ? "text-amber-700" : ""}>
+                  未処理 {formatNumber(shortResult.unmatched)} 行
                 </span>
               </div>
             </div>

@@ -2,11 +2,15 @@
 
 export type IngestType = "zenkikan_csv" | "90d_csv";
 
+// ショート専用CSVの種別（全期間 / 90日。列構成は通常と別物）
+export type ShortIngestType = "short_zenkikan_csv" | "short_90d_csv";
+
 export interface UploadResult {
   inserted: number;
   skipped: number;
   matched_videos: number;
   unmatched: number;
+  created?: number; // ショート取り込みで新規作成した動画本数
   log_id: string;
 }
 

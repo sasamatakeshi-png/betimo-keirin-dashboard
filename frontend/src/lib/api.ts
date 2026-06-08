@@ -9,7 +9,12 @@ import type {
 } from "@/types/analysis";
 import type { HomeResponse } from "@/types/dashboard";
 import type { EventSummary } from "@/types/event-summary";
-import type { IngestionLog, IngestType, UploadResult } from "@/types/ingestion";
+import type {
+  IngestionLog,
+  IngestType,
+  ShortIngestType,
+  UploadResult,
+} from "@/types/ingestion";
 import type {
   Channel,
   EventLite,
@@ -192,6 +197,41 @@ export async function uploadIngestionCsv(
 
 export function getIngestionLogs(): Promise<Page<IngestionLog>> {
   return apiGet<Page<IngestionLog>>("/api/ingestion/logs", { limit: 20 }, { auth: true });
+}
+
+// ショート専用CSVの投入（要ログイン）。通常CSVと同じ /upload に別 type で送る。
+export async function uploadShortCsv(
+  file: File,
+  type: ShortIngestType,
+): Promise<UploadResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("type", type);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/ingestion/upload", API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as UploadResult;
 }
 
 // --- AI分析 ---

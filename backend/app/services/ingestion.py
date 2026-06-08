@@ -16,10 +16,13 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
-from app.models import IngestionLog, MetricValue, Video
-from app.services.parsers import parse_90d_csv, parse_zenkikan_csv
+from app.models import Channel, IngestionLog, MetricValue, Video
+from app.services.parsers import parse_90d_csv, parse_short_csv, parse_zenkikan_csv
 
 INGEST_TYPES = {"zenkikan_csv", "90d_csv"}
+
+# ショート用 CSV の種別（全期間/90日。列構成は同一で、空欄の有無のみ異なる）。
+SHORT_INGEST_TYPES = {"short_zenkikan_csv", "short_90d_csv"}
 
 # recorded_at の決定論的算出基準。壁時計 now() ではなくファイル内容ハッシュから導出し、
 # 「同一ファイル再取り込みで重複しない」を保証する（B-1 移行の固定 recorded_at と同趣旨）。
@@ -146,5 +149,143 @@ def ingest_csv(db: Session, content: bytes, filename: str | None, ingest_type: s
         "skipped": skipped,
         "matched_videos": len(matched_video_ids),
         "unmatched": len(unmatched),
+        "log_id": log.id,
+    }
+
+
+def _compute_repeater_ratio(metrics: dict) -> None:
+    """repeat/unique からリピーター比率を補完（unique>0 のときのみ）。in-place。"""
+    if "repeater_ratio" in metrics:
+        return
+    uniq = metrics.get("unique_viewers")
+    rep = metrics.get("repeat_viewers")
+    if uniq and rep is not None and uniq > 0:
+        metrics["repeater_ratio"] = rep / uniq
+
+
+def ingest_short_csv(
+    db: Session, content: bytes, filename: str | None, ingest_type: str
+) -> dict:
+    """ショートCSV取り込み。
+
+    通常CSV(ingest_csv)と異なり「未登録の youtube_video_id は新規 video 作成
+    (content_type='short', is_competitor=False, 自社チャンネル)」する。
+    既存動画(=同一 youtube_video_id)には数値のみ付与し、種別やメタは変更しない。
+    metric_values は既存同様に決定論的 recorded_at + ON CONFLICT DO NOTHING で冪等。
+    """
+    started_at = datetime.now(timezone.utc)
+    recorded_at = deterministic_recorded_at(content)
+
+    records = parse_short_csv(content)
+    for rec in records:
+        _compute_repeater_ratio(rec["metrics"])
+
+    # 自社チャンネル（新規ショートの紐づけ先）。
+    own_channel_id = db.scalar(select(Channel.id).where(Channel.is_own.is_(True)))
+
+    # 既存 youtube_video_id → video.id
+    existing: dict[str, UUID] = {
+        yid: vid
+        for yid, vid in db.execute(
+            select(Video.youtube_video_id, Video.id).where(
+                Video.youtube_video_id.is_not(None)
+            )
+        ).all()
+    }
+
+    touched_video_ids: set[UUID] = set()
+    unmatched: list[str] = []
+    skipped = 0
+    created = 0
+    rows_to_insert: list[dict] = []
+    now = datetime.now(timezone.utc)
+
+    for rec in records:
+        yid = rec["identifier"]
+        if not yid:
+            skipped += 1
+            continue
+
+        vid = existing.get(yid)
+        if vid is None:
+            # 未登録 → ショートとして新規作成。自社チャンネルが無ければ作成不可。
+            if own_channel_id is None:
+                unmatched.append(yid)
+                skipped += 1
+                continue
+            new_video = Video(
+                youtube_video_id=yid,
+                channel_id=own_channel_id,
+                title=rec["title"] or yid,
+                published_at=rec["published_at"],
+                duration_seconds=rec["duration_seconds"],
+                is_competitor=False,
+                content_type="short",
+                cast_members=[],
+                created_at=now,
+                updated_at=now,
+            )
+            db.add(new_video)
+            db.flush()  # id を確定
+            vid = new_video.id
+            existing[yid] = vid
+            created += 1
+
+        touched_video_ids.add(vid)
+        metrics = {k: v for k, v in rec["metrics"].items() if v is not None}
+        if not metrics:
+            continue
+        for key, value in metrics.items():
+            rows_to_insert.append(
+                {
+                    "entity_type": "videos",
+                    "entity_id": vid,
+                    "metric_key": key,
+                    "value": value,
+                    "recorded_at": recorded_at,
+                    "source": "csv",
+                    "source_file": filename,
+                }
+            )
+
+    inserted = 0
+    if rows_to_insert:
+        stmt = (
+            pg_insert(MetricValue)
+            .values(rows_to_insert)
+            .on_conflict_do_nothing(index_elements=_CONFLICT_COLS)
+            .returning(MetricValue.id)
+        )
+        inserted = len(db.execute(stmt).fetchall())
+
+    processed = len(records)
+    if processed == 0:
+        log_status = "success"
+    elif unmatched:
+        log_status = "partial" if touched_video_ids else "failed"
+    else:
+        log_status = "success"
+
+    completed_at = datetime.now(timezone.utc)
+    log = IngestionLog(
+        source_type=ingest_type,
+        file_name=filename,
+        records_processed=processed,
+        records_failed=len(unmatched),
+        status=log_status,
+        started_at=started_at,
+        completed_at=completed_at,
+        error_log={"unmatched": unmatched[:50]} if unmatched else None,
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    return {
+        "inserted": inserted,
+        "skipped": skipped,
+        "matched_videos": len(touched_video_ids),
+        "unmatched": len(unmatched),
+        "created": created,
         "log_id": log.id,
     }

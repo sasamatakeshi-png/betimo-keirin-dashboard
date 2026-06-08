@@ -11,9 +11,16 @@ from app.core.security import get_current_auth
 from app.models import IngestionLog
 from app.schemas.common import Page, Pagination, pagination
 from app.schemas.ingestion import IngestionLogOut, UploadResult
-from app.services.ingestion import INGEST_TYPES, ingest_csv
+from app.services.ingestion import (
+    INGEST_TYPES,
+    SHORT_INGEST_TYPES,
+    ingest_csv,
+    ingest_short_csv,
+)
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
+
+_ALL_INGEST_TYPES = INGEST_TYPES | SHORT_INGEST_TYPES
 
 
 @router.post(
@@ -23,20 +30,26 @@ router = APIRouter(prefix="/ingestion", tags=["ingestion"])
 )
 async def upload_csv(
     file: UploadFile = File(...),
-    type: str = Form(..., description="zenkikan_csv | 90d_csv"),
+    type: str = Form(
+        ...,
+        description="zenkikan_csv | 90d_csv | short_zenkikan_csv | short_90d_csv",
+    ),
     db: Session = Depends(get_db),
 ) -> UploadResult:
-    if type not in INGEST_TYPES:
+    if type not in _ALL_INGEST_TYPES:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"type must be one of {sorted(INGEST_TYPES)}",
+            detail=f"type must be one of {sorted(_ALL_INGEST_TYPES)}",
         )
     content = await file.read()
     if not content:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="empty file"
         )
-    result = ingest_csv(db, content, file.filename, type)
+    if type in SHORT_INGEST_TYPES:
+        result = ingest_short_csv(db, content, file.filename, type)
+    else:
+        result = ingest_csv(db, content, file.filename, type)
     return UploadResult(**result)
 
 
