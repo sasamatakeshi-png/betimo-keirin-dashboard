@@ -85,6 +85,8 @@ const COLS: Col[] = [
   { id: "view_count", label: "再生数", align: "right", sortable: true, sortVal: metric("view_count"), render: (v) => formatNumber(metric("view_count")(v)) },
   { id: "subscriber_gain", label: "登録数", align: "right", sortable: true, sortVal: metric("subscriber_gain"), render: (v) => formatNumber(metric("subscriber_gain")(v)) },
   { id: "unique_viewers", label: "UU数", align: "right", sortable: true, sortVal: metric("unique_viewers"), render: (v) => formatNumber(metric("unique_viewers")(v)) },
+  { id: "new_viewers", label: "新規ユーザー", align: "right", sortable: true, sortVal: metric("new_viewers"), render: (v) => formatNumber(metric("new_viewers")(v)) },
+  { id: "repeat_viewers", label: "リピートユーザー", align: "right", sortable: true, sortVal: metric("repeat_viewers"), render: (v) => formatNumber(metric("repeat_viewers")(v)) },
   { id: "live_views", label: "ライブ視聴", align: "right", sortable: true, sortVal: metric("live_views"), render: (v) => formatNumber(metric("live_views")(v)) },
   { id: "archive_views", label: "アーカイブ視聴", align: "right", sortable: true, sortVal: metric("archive_views"), render: (v) => formatNumber(metric("archive_views")(v)) },
   { id: "avg_concurrent_viewers", label: "平均同接", align: "right", sortable: true, sortVal: metric("avg_concurrent_viewers"), render: (v) => formatNumber(metric("avg_concurrent_viewers")(v)) },
@@ -100,6 +102,17 @@ const COLS: Col[] = [
     render: (v) => v.youtube_video_id ?? "—",
   },
 ];
+
+// ショート文脈で非表示にする列（番組種別/出演/ライブ・アーカイブ視聴/同接系）。
+// 通常動画一覧・全データ一覧（shortMode=false）では従来どおり全列表示する。
+const SHORT_HIDDEN_COLS = new Set([
+  "program_type",
+  "cast",
+  "live_views",
+  "archive_views",
+  "avg_concurrent_viewers",
+  "max_concurrent_viewers",
+]);
 
 const PAGE_SIZE = 50;
 
@@ -117,22 +130,30 @@ export function VideosTable({
   canEdit,
   onEdit,
   onRequireLogin,
+  shortMode = false,
 }: {
   videos: Video[];
   eventNameById: Map<string, string>;
   canEdit: boolean;
   onEdit: (v: Video) => void;
   onRequireLogin: () => void;
+  // ショート文脈(/shorts)で true。短尺に無関係な列を隠す。既定 false=従来表示。
+  shortMode?: boolean;
 }) {
   const [sortId, setSortId] = useState<string>("published_at");
   const [dir, setDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
 
+  const cols = useMemo(
+    () => (shortMode ? COLS.filter((c) => !SHORT_HIDDEN_COLS.has(c.id)) : COLS),
+    [shortMode],
+  );
+
   const raceName = (v: Video): string =>
     (v.event_id ? eventNameById.get(v.event_id) : undefined) ?? v.title;
 
   const sorted = useMemo(() => {
-    const col = COLS.find((c) => c.id === sortId);
+    const col = cols.find((c) => c.id === sortId);
     if (!col?.sortVal) return videos;
     const arr = [...videos];
     arr.sort((a, b) => {
@@ -141,7 +162,7 @@ export function VideosTable({
     });
     return arr;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [videos, sortId, dir, eventNameById]);
+  }, [videos, sortId, dir, eventNameById, cols]);
 
   const pageCount = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
   const current = Math.min(page, pageCount - 1);
@@ -163,7 +184,7 @@ export function VideosTable({
         <table className="w-full border-collapse text-xs whitespace-nowrap">
           <thead className="bg-muted/50">
             <tr>
-              {COLS.map((c) => (
+              {cols.map((c) => (
                 <th
                   key={c.id}
                   className={`px-2 py-2 font-medium text-muted-foreground ${
@@ -185,7 +206,7 @@ export function VideosTable({
               const race = raceName(v);
               return (
                 <tr key={v.id} className="border-t hover:bg-muted/30">
-                  {COLS.map((c) => (
+                  {cols.map((c) => (
                     <td
                       key={c.id}
                       className={`px-2 py-1.5 tabular-nums ${
@@ -224,7 +245,7 @@ export function VideosTable({
             })}
             {rows.length === 0 && (
               <tr>
-                <td colSpan={COLS.length + 1} className="px-2 py-8 text-center text-muted-foreground">
+                <td colSpan={cols.length + 1} className="px-2 py-8 text-center text-muted-foreground">
                   該当データがありません
                 </td>
               </tr>

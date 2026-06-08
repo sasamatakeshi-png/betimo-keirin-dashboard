@@ -45,6 +45,15 @@ const METRICS: { label: string; key: string; fmt: Fmt }[] = [
   { label: "リピーター比率", key: "repeater_ratio", fmt: formatPercent },
 ];
 
+// ショート(content_type='short')として開いたときに隠す指標キー（同接系・ライブ/アーカイブ）。
+// 通常動画の詳細では従来どおり全指標を表示する。
+const SHORT_HIDDEN_METRICS = new Set([
+  "live_views",
+  "archive_views",
+  "avg_concurrent_viewers",
+  "max_concurrent_viewers",
+]);
+
 export default function VideoDetailPage() {
   const params = useParams<{ id: string }>();
   const id = params.id;
@@ -126,12 +135,19 @@ export default function VideoDetailPage() {
   const archive = m.archive_views ?? null;
   const breakdownTotal = (live ?? 0) + (archive ?? 0);
 
+  // ショートとして開いたときは短尺に無関係なセクション/指標を隠す（通常動画は不変）。
+  const isShort = video.content_type === "short";
+  const metricsToShow = isShort
+    ? METRICS.filter((mt) => !SHORT_HIDDEN_METRICS.has(mt.key))
+    : METRICS;
+
   return (
     <main className="mx-auto w-full max-w-6xl space-y-6 px-6 py-8">
       {/* a. ヘッダー */}
       <header className="space-y-2">
         <div className="flex flex-wrap items-center gap-2">
-          {video.program_type && <Badge variant="secondary">{video.program_type}</Badge>}
+          {!isShort && video.program_type && <Badge variant="secondary">{video.program_type}</Badge>}
+          {isShort && <Badge variant="secondary">ショート</Badge>}
           {video.grade && <Badge variant="outline">{video.grade}</Badge>}
           <span className="text-sm text-muted-foreground">
             {video.published_at ? formatDateTime(new Date(video.published_at)) : "—"}
@@ -144,7 +160,7 @@ export default function VideoDetailPage() {
               {eventName}
             </Link>
           )}
-          {video.cast_members.length > 0 && <span>出演: {video.cast_members.join("・")}</span>}
+          {!isShort && video.cast_members.length > 0 && <span>出演: {video.cast_members.join("・")}</span>}
           {video.youtube_video_id ? (
             <a
               href={`https://youtu.be/${video.youtube_video_id}`}
@@ -164,9 +180,9 @@ export default function VideoDetailPage() {
         )}
       </header>
 
-      {/* b. 数値カード（主要11指標） */}
+      {/* b. 数値カード（主要指標。ショートは同接系/ライブ・アーカイブを除外） */}
       <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-        {METRICS.map((mt) => (
+        {metricsToShow.map((mt) => (
           <Card key={mt.key} className="border-l-4 border-l-blue-500">
             <CardContent className="px-4 py-3">
               <div className="text-xs text-muted-foreground">{mt.label}</div>
@@ -178,7 +194,8 @@ export default function VideoDetailPage() {
         ))}
       </section>
 
-      {/* c. 同接×チャット 時系列 */}
+      {/* c. 同接×チャット 時系列（ショートでは非表示） */}
+      {!isShort && (
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle className="text-base">同接・チャット 時系列</CardTitle>
@@ -210,9 +227,10 @@ export default function VideoDetailPage() {
           )}
         </CardContent>
       </Card>
+      )}
 
-      {/* d. ライブ/アーカイブ内訳 */}
-      {(live !== null || archive !== null) && breakdownTotal > 0 && (
+      {/* d. ライブ/アーカイブ内訳（ショートでは非表示） */}
+      {!isShort && (live !== null || archive !== null) && breakdownTotal > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">ライブ / アーカイブ内訳</CardTitle>

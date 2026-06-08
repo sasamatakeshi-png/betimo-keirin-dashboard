@@ -130,6 +130,7 @@ export default function ShortsPage() {
           videos={videos}
           eventNameById={eventNameById}
           canEdit={canEdit}
+          shortMode
           onEdit={(v) => {
             setEditing(v);
             setEditOpen(true);
