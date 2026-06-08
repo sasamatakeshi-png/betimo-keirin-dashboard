@@ -49,7 +49,11 @@ def list_templates(
     )
 
 
-@router.post("/run", response_model=AnalysisRunResult)
+@router.post(
+    "/run",
+    response_model=AnalysisRunResult,
+    dependencies=[Depends(get_current_auth)],
+)
 def run(body: AnalysisRunRequest, db: Session = Depends(get_db)) -> AnalysisRunResult:
     try:
         result = run_analysis(

@@ -2,6 +2,11 @@
 // ベースURLは NEXT_PUBLIC_API_BASE_URL（既定 http://localhost:8000）。
 
 import { getToken } from "@/lib/auth";
+import type {
+  AnalysisResult,
+  AnalysisRunResult,
+  AnalysisTemplate,
+} from "@/types/analysis";
 import type { HomeResponse } from "@/types/dashboard";
 import type { EventSummary } from "@/types/event-summary";
 import type { IngestionLog, IngestType, UploadResult } from "@/types/ingestion";
@@ -187,4 +192,67 @@ export async function uploadIngestionCsv(
 
 export function getIngestionLogs(): Promise<Page<IngestionLog>> {
   return apiGet<Page<IngestionLog>>("/api/ingestion/logs", { limit: 20 }, { auth: true });
+}
+
+// --- AI分析 ---
+
+// 画面種別(event_detail / video_detail)で有効なテンプレを引く（認証不要）。
+export function getAnalysisTemplates(
+  screenType: string,
+): Promise<Page<AnalysisTemplate>> {
+  return apiGet<Page<AnalysisTemplate>>("/api/analysis/templates", {
+    screen_type: screenType,
+    limit: 50,
+  });
+}
+
+// 対象 entity の保存済み分析結果（generated_at 降順, 先頭が最新）（認証不要）。
+export function getAnalysisResults(
+  entityType: string,
+  entityId: string,
+): Promise<Page<AnalysisResult>> {
+  return apiGet<Page<AnalysisResult>>("/api/analysis/results", {
+    entity_type: entityType,
+    entity_id: entityId,
+    limit: 1,
+  });
+}
+
+// 分析を生成（要ログイン。apiPatch と同じくトークンを Bearer 付与）。
+export async function runAnalysis(body: {
+  entity_type: string;
+  entity_id: string;
+  template_id?: string;
+  prompt?: string;
+  tone?: string;
+  length?: string;
+}): Promise<AnalysisRunResult> {
+  const token = getToken();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/analysis/run", API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as AnalysisRunResult;
 }

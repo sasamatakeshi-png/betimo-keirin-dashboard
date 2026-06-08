@@ -14,6 +14,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { AIAnalysisCard } from "@/components/analysis/ai-analysis-card";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError, getEvent, getTimeseries, getVideo } from "@/lib/api";
@@ -234,6 +235,9 @@ export default function VideoDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      {/* e. AI分析 */}
+      <AIAnalysisCard entityType="videos" entityId={id} screenType="video_detail" />
     </main>
   );
 }

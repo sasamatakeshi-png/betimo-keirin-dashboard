@@ -13,6 +13,7 @@ import {
   YAxis,
 } from "recharts";
 
+import { AIAnalysisCard } from "@/components/analysis/ai-analysis-card";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiError, getEventSummary } from "@/lib/api";
@@ -267,6 +268,9 @@ export default function EventDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* f. AI分析 */}
+      <AIAnalysisCard entityType="events" entityId={id} screenType="event_detail" />
     </main>
   );
 }
