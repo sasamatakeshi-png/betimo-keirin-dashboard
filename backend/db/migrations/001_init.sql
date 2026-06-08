@@ -276,7 +276,8 @@ CREATE INDEX idx_results_template ON analysis_results (template_id);
 CREATE TABLE ingestion_logs (
   id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   source_type        TEXT NOT NULL
-                     CHECK (source_type IN ('youtube_api','csv','pdf','zip')),
+                     -- ショート取り込み種別(short_*)は 002 で追加。再初期化でも同じ集合になるよう列挙を揃える。
+                     CHECK (source_type IN ('youtube_api','csv','pdf','zip','short_zenkikan_csv','short_90d_csv')),
   file_name          TEXT,
   records_processed  INT NOT NULL DEFAULT 0,
   records_failed     INT NOT NULL DEFAULT 0,
