@@ -4,10 +4,22 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from datetime import datetime, timedelta, timezone
 
 # JST（YouTube Studio の公開時刻は JST 表記。UTC へ正規化して格納する）
 _JST = timezone(timedelta(hours=9))
+
+# 英語月名（先頭3文字）→ 月番号。strptime("%b") はロケール依存のため自前で持つ。
+_EN_MONTHS = {
+    m: i
+    for i, m in enumerate(
+        ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"],
+        start=1,
+    )
+}
+# "Mar 18, 2026" / "March 18, 2026" / "Mar 18 2026" 等
+_EN_DATE_RE = re.compile(r"^([A-Za-z]{3,})\.?\s+(\d{1,2}),?\s+(\d{4})$")
 
 # 動画識別子列（共通）
 ID_KEYWORDS = ["動画id", "コンテンツ", "動画", "content", "video"]
@@ -104,12 +116,25 @@ def parse_datetime_jst(raw: str | None) -> datetime | None:
     - タイムゾーン付き ISO（末尾 Z / +09:00 等）はその情報を尊重して UTC へ変換。
     - タイムゾーン無しは JST とみなして UTC へ変換。
     - "YYYY/MM/DD HH:MM(:SS)" / "YYYY-MM-DD ..." / 日付のみ も許容。
+    - 英語月名の "Mon DD, YYYY"（例 "Mar 18, 2026"。YouTube の公開日表記）も許容。
     """
     if raw is None:
         return None
     s = str(raw).strip()
     if s == "" or s in ("-", "—"):
         return None
+
+    # 英語月名 "Mon DD, YYYY"（日付のみ。JST の 0:00 とみなす）
+    m_en = _EN_DATE_RE.match(s)
+    if m_en:
+        mon = _EN_MONTHS.get(m_en.group(1)[:3].lower())
+        if mon:
+            try:
+                return datetime(
+                    int(m_en.group(3)), mon, int(m_en.group(2)), tzinfo=_JST
+                ).astimezone(timezone.utc)
+            except ValueError:
+                return None
 
     # ISO 8601（fromisoformat は 3.11+ で末尾 Z・空白区切りを許容）
     try:

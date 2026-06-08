@@ -197,6 +197,7 @@ def ingest_short_csv(
     unmatched: list[str] = []
     skipped = 0
     created = 0
+    backfilled = 0  # 既存ショートへ公開日を補完した件数
     rows_to_insert: list[dict] = []
     now = datetime.now(timezone.utc)
 
@@ -230,6 +231,20 @@ def ingest_short_csv(
             vid = new_video.id
             existing[yid] = vid
             created += 1
+        else:
+            # 既存ショートに公開日が未設定で CSV に値があれば補完（再取り込みで反映）。
+            # 通常動画(content_type='regular')には触れない。
+            pub = rec["published_at"]
+            if pub is not None:
+                v = db.get(Video, vid)
+                if (
+                    v is not None
+                    and v.content_type == "short"
+                    and v.published_at != pub
+                ):
+                    v.published_at = pub
+                    v.updated_at = now
+                    backfilled += 1
 
         touched_video_ids.add(vid)
         metrics = {k: v for k, v in rec["metrics"].items() if v is not None}
@@ -287,5 +302,6 @@ def ingest_short_csv(
         "matched_videos": len(touched_video_ids),
         "unmatched": len(unmatched),
         "created": created,
+        "backfilled": backfilled,  # 既存ショートへ公開日を補完した件数（UploadResultでは無視）
         "log_id": log.id,
     }

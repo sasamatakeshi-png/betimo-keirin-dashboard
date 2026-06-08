@@ -156,7 +156,8 @@ def parse_short_csv(content: bytes) -> list[dict]:
     if id_idx is None:
         id_idx = 0
     title_idx = find_col(headers_lower, ["動画のタイトル", "タイトル", "title"])
-    published_idx = find_col(headers_lower, ["公開", "published"])
+    # 日本語「動画公開時刻/公開日」・英語「Video publish time」両対応（publish で拾う）
+    published_idx = find_col(headers_lower, ["公開", "publish"])
     # 動画の長さ。「平均視聴時間」と区別するため平均/視聴を除外
     length_idx = find_col(headers_lower, ["長さ", "duration"], ("平均", "視聴"))
 
