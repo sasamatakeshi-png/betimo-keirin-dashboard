@@ -124,6 +124,33 @@ export function getVideos(params?: QueryParams): Promise<Page<Video>> {
   return apiGet<Page<Video>>("/api/videos", params);
 }
 
+// サーバの 1 ページ上限（MAX_LIMIT=200）。これを超える件数は複数ページで取得する。
+const VIDEOS_PAGE_LIMIT = 200;
+// 無限ループ防止の安全上限（最大 50 ページ = 10,000 件）。
+const VIDEOS_MAX_PAGES = 50;
+
+// /videos・/shorts 用: total に達するまで offset を進めて全ページ取得し結合する。
+// limit/offset は内部管理するため、呼び出し側が渡しても無視（上書き）する。
+export async function getAllVideos(params?: QueryParams): Promise<Video[]> {
+  const base: QueryParams = { ...(params ?? {}) };
+  delete base.limit;
+  delete base.offset;
+
+  const all: Video[] = [];
+  for (let page = 0; page < VIDEOS_MAX_PAGES; page += 1) {
+    const res = await getVideos({
+      ...base,
+      limit: VIDEOS_PAGE_LIMIT,
+      offset: page * VIDEOS_PAGE_LIMIT,
+    });
+    all.push(...res.items);
+    // 最終ページ（取得数が上限未満＝空含む）か、total 到達で停止
+    if (res.items.length < VIDEOS_PAGE_LIMIT) break;
+    if (all.length >= res.total) break;
+  }
+  return all;
+}
+
 export function getVideo(id: string): Promise<Video> {
   return apiGet<Video>(`/api/videos/${id}`);
 }

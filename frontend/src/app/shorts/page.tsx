@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoginDialog } from "@/components/auth/login-dialog";
 import { EditVideoDialog } from "@/components/videos/edit-video-dialog";
 import { VideosTable } from "@/components/videos/videos-table";
-import { getEvents, getVideos } from "@/lib/api";
+import { getAllVideos, getEvents } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { exportVideosCsv } from "@/lib/csv";
 import type { EventLite, Video } from "@/types/video";
@@ -49,17 +49,15 @@ export default function ShortsPage() {
     setLoading(true);
     setError(null);
     try {
-      const page = await getVideos({
+      const items = await getAllVideos({
         q,
         content_type: "short",
         date_from: dateFrom,
         date_to: dateTo,
         include: "metrics",
-        limit: 200,
-        offset: 0,
         order: "desc",
       });
-      setVideos(page.items);
+      setVideos(items);
     } catch (e) {
       setError(e instanceof Error ? e.message : "読み込みに失敗しました");
     } finally {
