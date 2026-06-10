@@ -19,6 +19,17 @@ class UploadResult(BaseModel):
     log_id: UUID
 
 
+class MonthlyUploadResult(BaseModel):
+    """月次CSV取り込み結果。"""
+
+    year_month: str
+    segment: str
+    kind: str  # metrics | demographics
+    rows_written: int
+    replaced: bool
+    log_id: UUID
+
+
 class IngestionLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

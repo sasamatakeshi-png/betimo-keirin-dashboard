@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     Column,
     Date,
@@ -164,6 +165,55 @@ class AnalysisResult(Base):
     input_data_snapshot = Column(JSONB)
     user_edits = Column(Text)
     generated_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class MonthlyChannelMetric(Base):
+    """月次・チャンネル全体の数値（数値CSVの合計行を segment ごと1行）。
+
+    003_monthly_channel_data.sql で新設。既存 metric_values とは独立。
+    % は生の百分率(例 45.2)のまま格納する。
+    """
+
+    __tablename__ = "monthly_channel_metrics"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
+    channel_id = Column(UUID(as_uuid=True), ForeignKey("channels.id"), nullable=False)
+    year_month = Column(Text, nullable=False)  # 'YYYY-MM'
+    segment = Column(Text, nullable=False)  # all / live / short
+    avg_view_duration_seconds = Column(Integer)
+    avg_view_percentage = Column(Numeric)
+    unique_viewers = Column(Integer)
+    new_viewers = Column(Integer)
+    repeat_viewers = Column(Integer)
+    view_count = Column(BigInteger)
+    total_watch_time_hours = Column(Numeric)
+    subscribers = Column(Integer)
+    impressions = Column(BigInteger)
+    impressions_ctr = Column(Numeric)
+    source_file = Column(Text)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
+class MonthlyDemographic(Base):
+    """月次・性別年齢分布（各行 = 年齢層 × 性別 × 視聴回数% × 総再生時間%）。
+
+    003_monthly_channel_data.sql で新設。% は生の百分率のまま格納する。
+    """
+
+    __tablename__ = "monthly_demographics"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
+    channel_id = Column(UUID(as_uuid=True), ForeignKey("channels.id"), nullable=False)
+    year_month = Column(Text, nullable=False)  # 'YYYY-MM'
+    segment = Column(Text, nullable=False)  # all / live / short
+    age_band = Column(Text, nullable=False)  # '13-17' ... '65-'
+    gender = Column(Text, nullable=False)  # male / female / other
+    views_pct = Column(Numeric)
+    watch_time_pct = Column(Numeric)
+    source_file = Column(Text)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
 
 
 class LatestMetricValue(Base):

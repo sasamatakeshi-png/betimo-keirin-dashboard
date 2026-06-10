@@ -103,3 +103,41 @@ class EventSummaryResponse(BaseModel):
     programs_by_max_ccu: list[ProgramRanking]
     daily_performance: list[DailyPerformance]
     videos: list[VideoOut]
+
+
+# ----- 月次（ホーム刷新用） -----
+
+
+class MonthlyMetricPoint(BaseModel):
+    """月次・チャンネル全体の数値1点（% は生の % 値）。"""
+
+    year_month: str  # 'YYYY-MM'
+    segment: str
+    avg_view_duration_seconds: int | None = None
+    avg_view_percentage: float | None = None
+    unique_viewers: int | None = None
+    new_viewers: int | None = None
+    repeat_viewers: int | None = None
+    view_count: int | None = None
+    total_watch_time_hours: float | None = None
+    subscribers: int | None = None
+    impressions: int | None = None
+    impressions_ctr: float | None = None
+
+
+class MonthlyMetricsResponse(BaseModel):
+    segment: str
+    items: list[MonthlyMetricPoint]  # year_month 昇順
+
+
+class DemographicItem(BaseModel):
+    age_band: str
+    gender: str
+    views_pct: float | None = None
+    watch_time_pct: float | None = None
+
+
+class MonthlyDemographicsResponse(BaseModel):
+    year_month: str | None  # 対象月（データ無しなら None）
+    segment: str
+    items: list[DemographicItem]

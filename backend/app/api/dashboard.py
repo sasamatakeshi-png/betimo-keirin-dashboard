@@ -17,16 +17,30 @@ from sqlalchemy import Date, and_, cast, func, select
 from sqlalchemy.orm import Session
 
 from app.core.db import get_db
-from app.models import Event, IngestionLog, LatestMetricValue, Video
+from app.models import (
+    Channel,
+    Event,
+    IngestionLog,
+    LatestMetricValue,
+    MonthlyChannelMetric,
+    MonthlyDemographic,
+    Video,
+)
 from app.schemas.dashboard import (
+    DemographicItem,
     EventMarker,
     HomeKpis,
     HomeResponse,
     IngestionStatus,
     Kpi,
+    MonthlyDemographicsResponse,
+    MonthlyMetricPoint,
+    MonthlyMetricsResponse,
     RecentEvent,
     ViewsTrendPoint,
 )
+
+_SEGMENTS = ("all", "live", "short")
 
 _KPI_KEYS = ["imp", "view_count", "subscriber_gain", "max_concurrent_viewers"]
 
@@ -218,4 +232,126 @@ def dashboard_home(
         recent_events=recent_events,
         ingestion_status=ingestion_status,
         events_markers=events_markers,
+    )
+
+
+# =====================================================================
+# 月次（ホーム刷新用・読み出し専用）
+#   monthly_channel_metrics / monthly_demographics を直接読む。
+#   既存 /dashboard/home には手を入れず追加のみ。対象は自社チャンネル(is_own)。
+# =====================================================================
+
+
+def _own_channel_id(db: Session):
+    return db.scalar(select(Channel.id).where(Channel.is_own.is_(True)))
+
+
+def _norm_segment(segment: str) -> str:
+    return segment if segment in _SEGMENTS else "all"
+
+
+@router.get("/monthly-metrics", response_model=MonthlyMetricsResponse)
+def monthly_metrics(
+    segment: str = Query("all", description="all | live | short"),
+    date_from: str | None = Query(None, description="対象月の下限 'YYYY-MM'"),
+    date_to: str | None = Query(None, description="対象月の上限 'YYYY-MM'"),
+    db: Session = Depends(get_db),
+) -> MonthlyMetricsResponse:
+    segment = _norm_segment(segment)
+    channel_id = _own_channel_id(db)
+    if channel_id is None:
+        return MonthlyMetricsResponse(segment=segment, items=[])
+
+    conds = [
+        MonthlyChannelMetric.channel_id == channel_id,
+        MonthlyChannelMetric.segment == segment,
+    ]
+    # year_month は 'YYYY-MM' 文字列。辞書順 = 時系列順のため範囲比較が成立。
+    if date_from:
+        conds.append(MonthlyChannelMetric.year_month >= date_from)
+    if date_to:
+        conds.append(MonthlyChannelMetric.year_month <= date_to)
+
+    rows = db.scalars(
+        select(MonthlyChannelMetric)
+        .where(*conds)
+        .order_by(MonthlyChannelMetric.year_month)
+    ).all()
+
+    items = [
+        MonthlyMetricPoint(
+            year_month=r.year_month,
+            segment=r.segment,
+            avg_view_duration_seconds=r.avg_view_duration_seconds,
+            avg_view_percentage=float(r.avg_view_percentage)
+            if r.avg_view_percentage is not None
+            else None,
+            unique_viewers=r.unique_viewers,
+            new_viewers=r.new_viewers,
+            repeat_viewers=r.repeat_viewers,
+            view_count=int(r.view_count) if r.view_count is not None else None,
+            total_watch_time_hours=float(r.total_watch_time_hours)
+            if r.total_watch_time_hours is not None
+            else None,
+            subscribers=r.subscribers,
+            impressions=int(r.impressions) if r.impressions is not None else None,
+            impressions_ctr=float(r.impressions_ctr)
+            if r.impressions_ctr is not None
+            else None,
+        )
+        for r in rows
+    ]
+    return MonthlyMetricsResponse(segment=segment, items=items)
+
+
+@router.get("/monthly-demographics", response_model=MonthlyDemographicsResponse)
+def monthly_demographics(
+    segment: str = Query("all", description="all | live | short"),
+    year_month: str | None = Query(
+        None, description="対象月 'YYYY-MM'。省略時は最新月"
+    ),
+    db: Session = Depends(get_db),
+) -> MonthlyDemographicsResponse:
+    segment = _norm_segment(segment)
+    channel_id = _own_channel_id(db)
+    if channel_id is None:
+        return MonthlyDemographicsResponse(
+            year_month=year_month, segment=segment, items=[]
+        )
+
+    base_conds = [
+        MonthlyDemographic.channel_id == channel_id,
+        MonthlyDemographic.segment == segment,
+    ]
+
+    # 対象月の決定（未指定なら最新月）。
+    target_ym = year_month
+    if target_ym is None:
+        target_ym = db.scalar(
+            select(func.max(MonthlyDemographic.year_month)).where(*base_conds)
+        )
+    if target_ym is None:
+        return MonthlyDemographicsResponse(
+            year_month=None, segment=segment, items=[]
+        )
+
+    rows = db.scalars(
+        select(MonthlyDemographic)
+        .where(*base_conds, MonthlyDemographic.year_month == target_ym)
+        .order_by(MonthlyDemographic.age_band, MonthlyDemographic.gender)
+    ).all()
+
+    items = [
+        DemographicItem(
+            age_band=r.age_band,
+            gender=r.gender,
+            views_pct=float(r.views_pct) if r.views_pct is not None else None,
+            watch_time_pct=float(r.watch_time_pct)
+            if r.watch_time_pct is not None
+            else None,
+        )
+        for r in rows
+    ]
+    return MonthlyDemographicsResponse(
+        year_month=target_ym, segment=segment, items=items
     )
