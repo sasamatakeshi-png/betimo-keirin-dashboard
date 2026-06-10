@@ -7,7 +7,12 @@ import type {
   AnalysisRunResult,
   AnalysisTemplate,
 } from "@/types/analysis";
-import type { HomeResponse } from "@/types/dashboard";
+import type {
+  HomeResponse,
+  MonthlyDemographicsResponse,
+  MonthlyMetricsResponse,
+  MonthlyVideoCountsResponse,
+} from "@/types/dashboard";
 import type { EventSummary } from "@/types/event-summary";
 import type {
   IngestionLog,
@@ -121,6 +126,34 @@ export function getDashboardHome(params?: {
   date_to?: string;
 }): Promise<HomeResponse> {
   return apiGet<HomeResponse>("/api/dashboard/home", params);
+}
+
+// --- 月次（ホーム刷新用・認証不要GET） ---
+
+export function getMonthlyMetrics(
+  segment: MonthlySegment,
+  dateFrom?: string,
+  dateTo?: string,
+): Promise<MonthlyMetricsResponse> {
+  return apiGet<MonthlyMetricsResponse>("/api/dashboard/monthly-metrics", {
+    segment,
+    date_from: dateFrom,
+    date_to: dateTo,
+  });
+}
+
+export function getMonthlyDemographics(
+  segment: MonthlySegment,
+  yearMonth?: string,
+): Promise<MonthlyDemographicsResponse> {
+  return apiGet<MonthlyDemographicsResponse>("/api/dashboard/monthly-demographics", {
+    segment,
+    year_month: yearMonth,
+  });
+}
+
+export function getMonthlyVideoCounts(): Promise<MonthlyVideoCountsResponse> {
+  return apiGet<MonthlyVideoCountsResponse>("/api/dashboard/monthly-video-counts");
 }
 
 export function getVideos(params?: QueryParams): Promise<Page<Video>> {

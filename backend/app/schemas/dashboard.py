@@ -141,3 +141,15 @@ class MonthlyDemographicsResponse(BaseModel):
     year_month: str | None  # 対象月（データ無しなら None）
     segment: str
     items: list[DemographicItem]
+
+
+class MonthlyVideoCountPoint(BaseModel):
+    """月別の本数集計。counts は全種別キーを常に含む（0件でも0）。"""
+
+    year_month: str  # 'YYYY-MM'（published_at の JST 月）
+    counts: dict[str, int]
+    total: int
+
+
+class MonthlyVideoCountsResponse(BaseModel):
+    items: list[MonthlyVideoCountPoint]  # year_month 昇順

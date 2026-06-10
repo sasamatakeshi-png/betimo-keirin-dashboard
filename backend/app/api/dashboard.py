@@ -36,11 +36,18 @@ from app.schemas.dashboard import (
     MonthlyDemographicsResponse,
     MonthlyMetricPoint,
     MonthlyMetricsResponse,
+    MonthlyVideoCountPoint,
+    MonthlyVideoCountsResponse,
     RecentEvent,
     ViewsTrendPoint,
 )
 
 _SEGMENTS = ("all", "live", "short")
+
+# 本数集計の種別カテゴリ。常に全キーを返す（0件でも0）。
+# regular は program_type で分類、未知/NULL は「その他」、short は content_type 優先で別枠。
+_PROGRAM_CATEGORIES = ["BKL", "あす勝ち", "ナイター", "ミッドナイト", "プレミアムトーク", "Bar", "その他"]
+_VIDEO_COUNT_CATEGORIES = _PROGRAM_CATEGORIES + ["short"]
 
 _KPI_KEYS = ["imp", "view_count", "subscriber_gain", "max_concurrent_viewers"]
 
@@ -355,3 +362,46 @@ def monthly_demographics(
     return MonthlyDemographicsResponse(
         year_month=target_ym, segment=segment, items=items
     )
+
+
+@router.get("/monthly-video-counts", response_model=MonthlyVideoCountsResponse)
+def monthly_video_counts(db: Session = Depends(get_db)) -> MonthlyVideoCountsResponse:
+    """自社動画(is_competitor=false)を「月 × 種別」で本数集計する。
+
+    - 月: published_at の JST(Asia/Tokyo) を 'YYYY-MM' 化。NULL は集計対象外。
+    - 種別: content_type='short' は 'short'（program_type より優先）。
+            regular は program_type で分類し、既知6種以外/NULL は「その他」。
+    """
+    ym = func.to_char(func.timezone("Asia/Tokyo", Video.published_at), "YYYY-MM")
+    rows = db.execute(
+        select(
+            ym.label("ym"),
+            Video.content_type,
+            Video.program_type,
+            func.count().label("n"),
+        )
+        .where(Video.is_competitor == False, Video.published_at.is_not(None))  # noqa: E712
+        .group_by(ym, Video.content_type, Video.program_type)
+    ).all()
+
+    known = set(_PROGRAM_CATEGORIES) - {"その他"}
+    buckets: dict[str, dict[str, int]] = {}
+    for r in rows:
+        if r.content_type == "short":
+            category = "short"
+        elif r.program_type in known:
+            category = r.program_type
+        else:
+            category = "その他"
+        month = buckets.setdefault(r.ym, {c: 0 for c in _VIDEO_COUNT_CATEGORIES})
+        month[category] += int(r.n)
+
+    items = [
+        MonthlyVideoCountPoint(
+            year_month=ymk,
+            counts=buckets[ymk],
+            total=sum(buckets[ymk].values()),
+        )
+        for ymk in sorted(buckets)
+    ]
+    return MonthlyVideoCountsResponse(items=items)
