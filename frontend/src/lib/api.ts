@@ -12,6 +12,9 @@ import type { EventSummary } from "@/types/event-summary";
 import type {
   IngestionLog,
   IngestType,
+  MonthlyKind,
+  MonthlySegment,
+  MonthlyUploadResult,
   ShortIngestType,
   UploadResult,
 } from "@/types/ingestion";
@@ -224,6 +227,46 @@ export async function uploadIngestionCsv(
 
 export function getIngestionLogs(): Promise<Page<IngestionLog>> {
   return apiGet<Page<IngestionLog>>("/api/ingestion/logs", { limit: 20 }, { auth: true });
+}
+
+// 月次CSV（チャンネル全体データ）の投入（要ログイン）。
+// file / year_month('YYYY-MM') / segment / kind を multipart で送る。
+export async function uploadMonthlyCsv(
+  file: File,
+  yearMonth: string,
+  segment: MonthlySegment,
+  kind: MonthlyKind,
+): Promise<MonthlyUploadResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("year_month", yearMonth);
+  form.append("segment", segment);
+  form.append("kind", kind);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/ingestion/monthly", API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as MonthlyUploadResult;
 }
 
 // ショート専用CSVの投入（要ログイン）。通常CSVと同じ /upload に別 type で送る。

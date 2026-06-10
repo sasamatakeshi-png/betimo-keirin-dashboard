@@ -5,6 +5,20 @@ export type IngestType = "zenkikan_csv" | "90d_csv";
 // ショート専用CSVの種別（全期間 / 90日。列構成は通常と別物）
 export type ShortIngestType = "short_zenkikan_csv" | "short_90d_csv";
 
+// 月次CSV（チャンネル全体データ）の入力種別
+export type MonthlySegment = "all" | "live" | "short";
+export type MonthlyKind = "metrics" | "demographics";
+
+// POST /api/ingestion/monthly のレスポンス（schemas/ingestion.py MonthlyUploadResult と対応）
+export interface MonthlyUploadResult {
+  year_month: string; // 'YYYY-MM'
+  segment: MonthlySegment;
+  kind: MonthlyKind;
+  rows_written: number;
+  replaced: boolean;
+  log_id: string;
+}
+
 export interface UploadResult {
   inserted: number;
   skipped: number;

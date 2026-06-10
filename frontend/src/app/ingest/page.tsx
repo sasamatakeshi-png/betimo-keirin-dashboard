@@ -11,6 +11,7 @@ import {
   ApiError,
   getIngestionLogs,
   uploadIngestionCsv,
+  uploadMonthlyCsv,
   uploadShortCsv,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -18,6 +19,9 @@ import { formatDateTime, formatNumber } from "@/lib/format";
 import type {
   IngestionLog,
   IngestType,
+  MonthlyKind,
+  MonthlySegment,
+  MonthlyUploadResult,
   ShortIngestType,
   UploadResult,
 } from "@/types/ingestion";
@@ -37,6 +41,59 @@ const STATUS_BADGE: Record<string, string> = {
   partial: "bg-amber-50 text-amber-700",
   failed: "bg-red-50 text-red-600",
 };
+
+// --- 月次データCSV ---
+
+const MONTHLY_KIND_OPTIONS: { value: MonthlyKind; label: string; hint: string }[] = [
+  { value: "metrics", label: "数値CSV", hint: "合計行のみ採用。平均視聴時間/視聴率/UU/再生/登録/imp 等10指標" },
+  { value: "demographics", label: "性別年齢CSV", hint: "年齢層×性別の 視聴回数% / 総再生時間%" },
+];
+
+const MONTHLY_SEGMENT_OPTIONS: { value: MonthlySegment; label: string }[] = [
+  { value: "all", label: "全体" },
+  { value: "live", label: "ライブ" },
+  { value: "short", label: "ショート" },
+];
+
+const MONTHLY_KIND_LABEL: Record<MonthlyKind, string> = {
+  metrics: "数値",
+  demographics: "性別年齢",
+};
+const MONTHLY_SEGMENT_LABEL: Record<MonthlySegment, string> = {
+  all: "全体",
+  live: "ライブ",
+  short: "ショート",
+};
+
+// 取り込み対象月の下限（2025-11 以降）
+const MONTHLY_START_YEAR = 2025;
+const MONTHLY_START_MONTH = 11; // 1始まり
+
+// 2025-11 〜 当月 の 'YYYY-MM' を新しい順で生成。
+function buildMonthOptions(now: Date): { value: string; label: string }[] {
+  const endYear = now.getFullYear();
+  const endMonth = now.getMonth() + 1; // 1始まり
+  const out: { value: string; label: string }[] = [];
+  let y = endYear;
+  let m = endMonth;
+  // 下限に達するまで1か月ずつ遡る
+  while (y > MONTHLY_START_YEAR || (y === MONTHLY_START_YEAR && m >= MONTHLY_START_MONTH)) {
+    out.push({ value: `${y}-${String(m).padStart(2, "0")}`, label: `${y}年${m}月` });
+    m -= 1;
+    if (m === 0) {
+      m = 12;
+      y -= 1;
+    }
+  }
+  return out;
+}
+
+// 'YYYY-MM' → '2026年5月'（結果表示用）
+function formatYearMonthLabel(ym: string): string {
+  const m = /^(\d{4})-(\d{2})$/.exec(ym);
+  if (!m) return ym;
+  return `${Number(m[1])}年${Number(m[2])}月`;
+}
 
 export default function IngestPage() {
   const { canEdit, authRequired, probed } = useAuth();
@@ -58,6 +115,23 @@ export default function IngestPage() {
   const [shortResult, setShortResult] = useState<UploadResult | null>(null);
   const [shortResultFile, setShortResultFile] = useState<string | null>(null);
   const [shortError, setShortError] = useState<string | null>(null);
+
+  // 月次データCSV（通常/ショートとは独立した投入口）
+  // 対象月リストは現在時刻から算出（lazy初期化。既定は最新月）。
+  const [monthOptions] = useState<{ value: string; label: string }[]>(() =>
+    buildMonthOptions(new Date()),
+  );
+  const [monthlyYearMonth, setMonthlyYearMonth] = useState<string>(
+    () => monthOptions[0]?.value ?? "",
+  );
+  const [monthlyKind, setMonthlyKind] = useState<MonthlyKind>("metrics");
+  const [monthlySegment, setMonthlySegment] = useState<MonthlySegment>("all");
+  const [monthlyFile, setMonthlyFile] = useState<File | null>(null);
+  const [monthlyDragOver, setMonthlyDragOver] = useState(false);
+  const [monthlyUploading, setMonthlyUploading] = useState(false);
+  const [monthlyResult, setMonthlyResult] = useState<MonthlyUploadResult | null>(null);
+  const [monthlyResultFile, setMonthlyResultFile] = useState<string | null>(null);
+  const [monthlyError, setMonthlyError] = useState<string | null>(null);
 
   const [logs, setLogs] = useState<IngestionLog[]>([]);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -138,6 +212,38 @@ export default function IngestPage() {
       setShortFile(f);
       setShortResult(null);
       setShortError(null);
+    }
+  }
+
+  async function handleUploadMonthly() {
+    if (!monthlyFile || !monthlyYearMonth || !canEdit || monthlyUploading) return;
+    setMonthlyUploading(true);
+    setMonthlyError(null);
+    setMonthlyResult(null);
+    try {
+      const r = await uploadMonthlyCsv(
+        monthlyFile,
+        monthlyYearMonth,
+        monthlySegment,
+        monthlyKind,
+      );
+      setMonthlyResult(r);
+      setMonthlyResultFile(monthlyFile.name);
+      setMonthlyFile(null);
+      setLogsLoading(true);
+      void loadLogs();
+    } catch (e) {
+      setMonthlyError(e instanceof Error ? e.message : "アップロードに失敗しました");
+    } finally {
+      setMonthlyUploading(false);
+    }
+  }
+
+  function pickMonthlyFile(f: File | undefined | null) {
+    if (f) {
+      setMonthlyFile(f);
+      setMonthlyResult(null);
+      setMonthlyError(null);
     }
   }
 
@@ -384,6 +490,173 @@ export default function IngestPage() {
                 <span className={shortResult.unmatched > 0 ? "text-amber-700" : ""}>
                   未処理 {formatNumber(shortResult.unmatched)} 行
                 </span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 月次データCSVアップロード（通常/ショートとは独立） */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">月次データCSVアップロード</CardTitle>
+          {authRequired === true && !canEdit && (
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            チャンネル全体の月次データ。対象月・種別・セグメントを選んで投入します。同じ月・種別・セグメントを入れ直すと最新値で置換されます。
+          </p>
+
+          {/* 対象月・種別・セグメント */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* 対象月 */}
+            <div className="space-y-1">
+              <label htmlFor="monthly-year-month" className="block text-xs font-medium text-muted-foreground">
+                対象月
+              </label>
+              <select
+                id="monthly-year-month"
+                value={monthlyYearMonth}
+                onChange={(e) => setMonthlyYearMonth(e.target.value)}
+                className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
+              >
+                {monthOptions.length === 0 && <option value="">—</option>}
+                {monthOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* セグメント */}
+            <div className="space-y-1">
+              <span className="block text-xs font-medium text-muted-foreground">セグメント</span>
+              <div className="flex flex-wrap gap-2">
+                {MONTHLY_SEGMENT_OPTIONS.map((opt) => (
+                  <label
+                    key={opt.value}
+                    className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${
+                      monthlySegment === opt.value ? "border-blue-500 bg-blue-50/50" : "hover:bg-muted/40"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="monthly-segment"
+                      checked={monthlySegment === opt.value}
+                      onChange={() => setMonthlySegment(opt.value)}
+                    />
+                    <span className="font-medium">{opt.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 種別 */}
+          <div className="flex flex-wrap gap-3">
+            {MONTHLY_KIND_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm ${
+                  monthlyKind === opt.value ? "border-blue-500 bg-blue-50/50" : "hover:bg-muted/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="monthly-kind"
+                  checked={monthlyKind === opt.value}
+                  onChange={() => setMonthlyKind(opt.value)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">{opt.label}</span>
+                  <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          {/* ファイル選択 */}
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setMonthlyDragOver(true);
+            }}
+            onDragLeave={() => setMonthlyDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setMonthlyDragOver(false);
+              pickMonthlyFile(e.dataTransfer.files?.[0]);
+            }}
+            className={`flex h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm ${
+              monthlyDragOver ? "border-blue-400 bg-blue-50/50" : "border-muted-foreground/25 hover:bg-muted/30"
+            }`}
+          >
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                pickMonthlyFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            {monthlyFile ? (
+              <>
+                <span className="font-medium">{monthlyFile.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {formatNumber(monthlyFile.size)} バイト — クリックで選び直し
+                </span>
+              </>
+            ) : (
+              <>
+                <span>月次CSVをドロップ、またはクリックして選択</span>
+                <span className="text-xs text-muted-foreground">.csv（UTF-8 / Shift_JIS 両対応）</span>
+              </>
+            )}
+          </label>
+
+          {/* 実行 */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleUploadMonthly()}
+              disabled={!monthlyFile || !monthlyYearMonth || !canEdit || monthlyUploading}
+              className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {monthlyUploading ? "投入中…" : "月次取り込み実行"}
+            </button>
+            {!canEdit && probed && (
+              <span className="text-xs text-muted-foreground">投入にはログインが必要です</span>
+            )}
+          </div>
+
+          {/* 結果 / エラー */}
+          {monthlyError && (
+            <div className="rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600">
+              {monthlyError}
+            </div>
+          )}
+          {monthlyResult && (
+            <div className="rounded-md border border-green-200 bg-green-50/50 p-3 text-sm">
+              <div className="font-medium text-green-800">
+                {formatYearMonthLabel(monthlyResult.year_month)}・
+                {MONTHLY_KIND_LABEL[monthlyResult.kind]}・
+                {MONTHLY_SEGMENT_LABEL[monthlyResult.segment]} を取り込みました
+                {monthlyResult.replaced ? "（置換）" : ""}
+                {monthlyResultFile ? `: ${monthlyResultFile}` : ""}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>保存 {formatNumber(monthlyResult.rows_written)} 行</span>
               </div>
             </div>
           )}
