@@ -3,7 +3,7 @@
 // データ取り込み: 全期間CSV / 90日CSV をアップロードして metric_values へ投入し、
 // 取り込み履歴(ingestion_logs)を表示する。投入は要ログイン（編集権限）。
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { LoginDialog } from "@/components/auth/login-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,7 +21,6 @@ import type {
   IngestType,
   MonthlyKind,
   MonthlySegment,
-  MonthlyUploadResult,
   ShortIngestType,
   UploadResult,
 } from "@/types/ingestion";
@@ -95,6 +94,61 @@ function formatYearMonthLabel(ym: string): string {
   return `${Number(m[1])}年${Number(m[2])}月`;
 }
 
+// 月次・複数ファイル投入の1行分の状態
+type MonthlyRowStatus = "idle" | "uploading" | "success" | "error";
+interface MonthlyRow {
+  id: string;
+  fileName: string;
+  file: File;
+  yearMonth: string;
+  kind: MonthlyKind;
+  segment: MonthlySegment;
+  status: MonthlyRowStatus;
+  message: string | null;
+}
+
+// ファイル名から 月/種別/セグメント の初期値を推測する（外れても手で変更可）。
+// 規則:
+//  - 種別: 「性別」「年齢」「demographic」「gender」「age」を含めば demographics、他は metrics。
+//  - セグメント: 「ショート/short」→short、「ライブ/live/配信」→live、「全体/all/チャンネル」→all、既定 all。
+//  - 対象月: 「YYYY-MM / YYYY_MM / YYYYMM」または「YYYY年M月」を優先。年の無い「M月」は
+//    その月を持つ最新の選択肢を採用。いずれも候補に無ければ既定(最新月)。
+function guessMonthlyFromName(
+  name: string,
+  monthOptions: { value: string }[],
+  defaultYearMonth: string,
+): { yearMonth: string; kind: MonthlyKind; segment: MonthlySegment } {
+  let kind: MonthlyKind = "metrics";
+  if (/性別|年齢|demograph|gender|age/i.test(name)) kind = "demographics";
+
+  let segment: MonthlySegment = "all";
+  if (/ショート|short/i.test(name)) segment = "short";
+  else if (/ライブ|live|配信/i.test(name)) segment = "live";
+  else if (/全体|all|チャンネル/i.test(name)) segment = "all";
+
+  let yearMonth = defaultYearMonth;
+  const valid = new Set(monthOptions.map((o) => o.value));
+  const ym = /(20\d{2})[-_.]?(0[1-9]|1[0-2])/.exec(name);
+  if (ym && valid.has(`${ym[1]}-${ym[2]}`)) {
+    yearMonth = `${ym[1]}-${ym[2]}`;
+  } else {
+    const mm = /(\d{1,2})\s*月/.exec(name);
+    const month = mm ? Number(mm[1]) : 0;
+    if (month >= 1 && month <= 12) {
+      const mp = String(month).padStart(2, "0");
+      const yyyy = /(20\d{2})\s*年/.exec(name);
+      if (yyyy && valid.has(`${yyyy[1]}-${mp}`)) {
+        yearMonth = `${yyyy[1]}-${mp}`;
+      } else {
+        // 年指定なし → その月を持つ最新の選択肢（monthOptions は新しい順）
+        const found = monthOptions.find((o) => o.value.endsWith(`-${mp}`));
+        if (found) yearMonth = found.value;
+      }
+    }
+  }
+  return { yearMonth, kind, segment };
+}
+
 export default function IngestPage() {
   const { canEdit, authRequired, probed } = useAuth();
 
@@ -116,22 +170,22 @@ export default function IngestPage() {
   const [shortResultFile, setShortResultFile] = useState<string | null>(null);
   const [shortError, setShortError] = useState<string | null>(null);
 
-  // 月次データCSV（通常/ショートとは独立した投入口）
+  // 月次データCSV（複数ファイルをまとめて投入。通常/ショートとは独立）
   // 対象月リストは現在時刻から算出（lazy初期化。既定は最新月）。
   const [monthOptions] = useState<{ value: string; label: string }[]>(() =>
     buildMonthOptions(new Date()),
   );
-  const [monthlyYearMonth, setMonthlyYearMonth] = useState<string>(
-    () => monthOptions[0]?.value ?? "",
-  );
-  const [monthlyKind, setMonthlyKind] = useState<MonthlyKind>("metrics");
-  const [monthlySegment, setMonthlySegment] = useState<MonthlySegment>("all");
-  const [monthlyFile, setMonthlyFile] = useState<File | null>(null);
+  const monthlyDefaultYM = monthOptions[0]?.value ?? "";
+  const [monthlyRows, setMonthlyRows] = useState<MonthlyRow[]>([]);
   const [monthlyDragOver, setMonthlyDragOver] = useState(false);
-  const [monthlyUploading, setMonthlyUploading] = useState(false);
-  const [monthlyResult, setMonthlyResult] = useState<MonthlyUploadResult | null>(null);
-  const [monthlyResultFile, setMonthlyResultFile] = useState<string | null>(null);
-  const [monthlyError, setMonthlyError] = useState<string | null>(null);
+  const [monthlyBatchRunning, setMonthlyBatchRunning] = useState(false);
+  const [monthlyProgress, setMonthlyProgress] = useState<{ current: number; total: number } | null>(
+    null,
+  );
+  const [monthlySummary, setMonthlySummary] = useState<{ success: number; fail: number } | null>(
+    null,
+  );
+  const monthlyRowIdRef = useRef(0);
 
   const [logs, setLogs] = useState<IngestionLog[]>([]);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -215,36 +269,95 @@ export default function IngestPage() {
     }
   }
 
-  async function handleUploadMonthly() {
-    if (!monthlyFile || !monthlyYearMonth || !canEdit || monthlyUploading) return;
-    setMonthlyUploading(true);
-    setMonthlyError(null);
-    setMonthlyResult(null);
-    try {
-      const r = await uploadMonthlyCsv(
-        monthlyFile,
-        monthlyYearMonth,
-        monthlySegment,
-        monthlyKind,
-      );
-      setMonthlyResult(r);
-      setMonthlyResultFile(monthlyFile.name);
-      setMonthlyFile(null);
-      setLogsLoading(true);
-      void loadLogs();
-    } catch (e) {
-      setMonthlyError(e instanceof Error ? e.message : "アップロードに失敗しました");
-    } finally {
-      setMonthlyUploading(false);
-    }
+  function addMonthlyFiles(files: FileList | File[] | null | undefined) {
+    if (!files) return;
+    const arr = Array.from(files).filter(
+      (f) =>
+        f.name.toLowerCase().endsWith(".csv") ||
+        f.type === "text/csv" ||
+        f.type === "application/vnd.ms-excel",
+    );
+    if (arr.length === 0) return;
+    setMonthlySummary(null);
+    setMonthlyRows((rows) => {
+      const next = [...rows];
+      for (const f of arr) {
+        monthlyRowIdRef.current += 1;
+        const g = guessMonthlyFromName(f.name, monthOptions, monthlyDefaultYM);
+        next.push({
+          id: `mr${monthlyRowIdRef.current}`,
+          fileName: f.name,
+          file: f,
+          yearMonth: g.yearMonth,
+          kind: g.kind,
+          segment: g.segment,
+          status: "idle",
+          message: null,
+        });
+      }
+      return next;
+    });
   }
 
-  function pickMonthlyFile(f: File | undefined | null) {
-    if (f) {
-      setMonthlyFile(f);
-      setMonthlyResult(null);
-      setMonthlyError(null);
+  function updateMonthlyRow(id: string, patch: Partial<MonthlyRow>) {
+    setMonthlyRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+
+  function removeMonthlyRow(id: string) {
+    setMonthlyRows((rows) => rows.filter((r) => r.id !== id));
+  }
+
+  function clearMonthlyRows() {
+    setMonthlyRows([]);
+    setMonthlySummary(null);
+    setMonthlyProgress(null);
+  }
+
+  async function handleUploadMonthlyBatch() {
+    if (!canEdit || monthlyBatchRunning) return;
+    // 未成功(idle/error)の行のみ処理 → 失敗後の再実行で成功分を二重投入しない
+    const targets = monthlyRows.filter((r) => r.status !== "success");
+    if (targets.length === 0) return;
+
+    setMonthlyBatchRunning(true);
+    setMonthlySummary(null);
+    setMonthlyProgress({ current: 0, total: targets.length });
+
+    let success = 0;
+    let fail = 0;
+    for (let i = 0; i < targets.length; i += 1) {
+      const row = targets[i];
+      setMonthlyProgress({ current: i + 1, total: targets.length });
+      updateMonthlyRow(row.id, { status: "uploading", message: null });
+
+      if (!row.yearMonth) {
+        fail += 1;
+        updateMonthlyRow(row.id, { status: "error", message: "対象月を選択してください" });
+        continue;
+      }
+      try {
+        const r = await uploadMonthlyCsv(row.file, row.yearMonth, row.segment, row.kind);
+        success += 1;
+        updateMonthlyRow(row.id, {
+          status: "success",
+          message: `${formatYearMonthLabel(r.year_month)}・${MONTHLY_KIND_LABEL[r.kind]}・${
+            MONTHLY_SEGMENT_LABEL[r.segment]
+          } 保存 ${formatNumber(r.rows_written)} 行${r.replaced ? "（置換）" : ""}`,
+        });
+      } catch (e) {
+        fail += 1;
+        updateMonthlyRow(row.id, {
+          status: "error",
+          message: e instanceof Error ? e.message : "アップロードに失敗しました",
+        });
+      }
     }
+
+    setMonthlySummary({ success, fail });
+    setMonthlyProgress(null);
+    setMonthlyBatchRunning(false);
+    setLogsLoading(true);
+    void loadLogs();
   }
 
   return (
@@ -512,80 +625,10 @@ export default function IngestPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-xs text-muted-foreground">
-            チャンネル全体の月次データ。対象月・種別・セグメントを選んで投入します。同じ月・種別・セグメントを入れ直すと最新値で置換されます。
+            チャンネル全体の月次データを複数まとめて投入できます。ファイルごとに対象月・種別・セグメントを指定し、「まとめて取り込み」で順番に登録します。同じ月・種別・セグメントを入れ直すと最新値で置換されます。
           </p>
 
-          {/* 対象月・種別・セグメント */}
-          <div className="grid gap-4 sm:grid-cols-2">
-            {/* 対象月 */}
-            <div className="space-y-1">
-              <label htmlFor="monthly-year-month" className="block text-xs font-medium text-muted-foreground">
-                対象月
-              </label>
-              <select
-                id="monthly-year-month"
-                value={monthlyYearMonth}
-                onChange={(e) => setMonthlyYearMonth(e.target.value)}
-                className="w-full rounded-md border bg-background px-3 py-1.5 text-sm"
-              >
-                {monthOptions.length === 0 && <option value="">—</option>}
-                {monthOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* セグメント */}
-            <div className="space-y-1">
-              <span className="block text-xs font-medium text-muted-foreground">セグメント</span>
-              <div className="flex flex-wrap gap-2">
-                {MONTHLY_SEGMENT_OPTIONS.map((opt) => (
-                  <label
-                    key={opt.value}
-                    className={`flex cursor-pointer items-center gap-1.5 rounded-lg border px-3 py-1.5 text-sm ${
-                      monthlySegment === opt.value ? "border-blue-500 bg-blue-50/50" : "hover:bg-muted/40"
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="monthly-segment"
-                      checked={monthlySegment === opt.value}
-                      onChange={() => setMonthlySegment(opt.value)}
-                    />
-                    <span className="font-medium">{opt.label}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          </div>
-
-          {/* 種別 */}
-          <div className="flex flex-wrap gap-3">
-            {MONTHLY_KIND_OPTIONS.map((opt) => (
-              <label
-                key={opt.value}
-                className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm ${
-                  monthlyKind === opt.value ? "border-blue-500 bg-blue-50/50" : "hover:bg-muted/40"
-                }`}
-              >
-                <input
-                  type="radio"
-                  name="monthly-kind"
-                  checked={monthlyKind === opt.value}
-                  onChange={() => setMonthlyKind(opt.value)}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="font-medium">{opt.label}</span>
-                  <span className="block text-xs text-muted-foreground">{opt.hint}</span>
-                </span>
-              </label>
-            ))}
-          </div>
-
-          {/* ファイル選択 */}
+          {/* ファイル選択（複数可・ドラッグ&ドロップ） */}
           <label
             onDragOver={(e) => {
               e.preventDefault();
@@ -595,69 +638,168 @@ export default function IngestPage() {
             onDrop={(e) => {
               e.preventDefault();
               setMonthlyDragOver(false);
-              pickMonthlyFile(e.dataTransfer.files?.[0]);
+              addMonthlyFiles(e.dataTransfer.files);
             }}
-            className={`flex h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm ${
+            className={`flex h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm ${
               monthlyDragOver ? "border-blue-400 bg-blue-50/50" : "border-muted-foreground/25 hover:bg-muted/30"
             }`}
           >
             <input
               type="file"
               accept=".csv,text/csv"
+              multiple
               className="hidden"
               onChange={(e) => {
-                pickMonthlyFile(e.target.files?.[0]);
+                addMonthlyFiles(e.target.files);
                 e.target.value = "";
               }}
             />
-            {monthlyFile ? (
-              <>
-                <span className="font-medium">{monthlyFile.name}</span>
-                <span className="text-xs text-muted-foreground">
-                  {formatNumber(monthlyFile.size)} バイト — クリックで選び直し
-                </span>
-              </>
-            ) : (
-              <>
-                <span>月次CSVをドロップ、またはクリックして選択</span>
-                <span className="text-xs text-muted-foreground">.csv（UTF-8 / Shift_JIS 両対応）</span>
-              </>
-            )}
+            <span>月次CSVをドロップ、またはクリックして選択（複数可）</span>
+            <span className="text-xs text-muted-foreground">.csv（UTF-8 / Shift_JIS 両対応）</span>
           </label>
 
+          {/* ファイルごとの設定リスト */}
+          {monthlyRows.length > 0 && (
+            <div className="space-y-2">
+              {monthlyRows.map((row) => (
+                <div key={row.id} className="space-y-2 rounded-lg border p-3 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium" title={row.fileName}>
+                      {row.fileName}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {row.status === "uploading" && (
+                        <span className="text-xs text-blue-600">処理中…</span>
+                      )}
+                      {row.status === "success" && (
+                        <span className="rounded bg-green-50 px-1.5 py-0.5 text-xs text-green-700">✓ 成功</span>
+                      )}
+                      {row.status === "error" && (
+                        <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-600">✗ 失敗</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeMonthlyRow(row.id)}
+                        disabled={monthlyBatchRunning}
+                        className="rounded border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50"
+                      >
+                        削除
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2">
+                    {/* 対象月 */}
+                    <select
+                      aria-label="対象月"
+                      value={row.yearMonth}
+                      onChange={(e) => updateMonthlyRow(row.id, { yearMonth: e.target.value })}
+                      disabled={monthlyBatchRunning}
+                      className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+                    >
+                      {monthOptions.length === 0 && <option value="">—</option>}
+                      {monthOptions.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* 種別 */}
+                    <select
+                      aria-label="種別"
+                      value={row.kind}
+                      onChange={(e) =>
+                        updateMonthlyRow(row.id, { kind: e.target.value as MonthlyKind })
+                      }
+                      disabled={monthlyBatchRunning}
+                      className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+                    >
+                      {MONTHLY_KIND_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+
+                    {/* セグメント */}
+                    <select
+                      aria-label="セグメント"
+                      value={row.segment}
+                      onChange={(e) =>
+                        updateMonthlyRow(row.id, { segment: e.target.value as MonthlySegment })
+                      }
+                      disabled={monthlyBatchRunning}
+                      className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+                    >
+                      {MONTHLY_SEGMENT_OPTIONS.map((opt) => (
+                        <option key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {row.message && (
+                    <div
+                      className={`text-xs ${
+                        row.status === "error" ? "text-red-600" : "text-muted-foreground"
+                      }`}
+                    >
+                      {row.message}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* 実行 */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <button
               type="button"
-              onClick={() => void handleUploadMonthly()}
-              disabled={!monthlyFile || !monthlyYearMonth || !canEdit || monthlyUploading}
+              onClick={() => void handleUploadMonthlyBatch()}
+              disabled={
+                !canEdit ||
+                monthlyBatchRunning ||
+                monthlyRows.length === 0 ||
+                monthlyRows.every((r) => r.status === "success")
+              }
               className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
             >
-              {monthlyUploading ? "投入中…" : "月次取り込み実行"}
+              {monthlyBatchRunning ? "取り込み中…" : "まとめて取り込み"}
             </button>
+            {monthlyRows.length > 0 && (
+              <button
+                type="button"
+                onClick={clearMonthlyRows}
+                disabled={monthlyBatchRunning}
+                className="rounded border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                クリア
+              </button>
+            )}
+            {monthlyProgress && (
+              <span className="text-xs text-muted-foreground">
+                {monthlyProgress.current}/{monthlyProgress.total} 処理中…
+              </span>
+            )}
             {!canEdit && probed && (
               <span className="text-xs text-muted-foreground">投入にはログインが必要です</span>
             )}
           </div>
 
-          {/* 結果 / エラー */}
-          {monthlyError && (
-            <div className="rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600">
-              {monthlyError}
-            </div>
-          )}
-          {monthlyResult && (
-            <div className="rounded-md border border-green-200 bg-green-50/50 p-3 text-sm">
-              <div className="font-medium text-green-800">
-                {formatYearMonthLabel(monthlyResult.year_month)}・
-                {MONTHLY_KIND_LABEL[monthlyResult.kind]}・
-                {MONTHLY_SEGMENT_LABEL[monthlyResult.segment]} を取り込みました
-                {monthlyResult.replaced ? "（置換）" : ""}
-                {monthlyResultFile ? `: ${monthlyResultFile}` : ""}
-              </div>
-              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-                <span>保存 {formatNumber(monthlyResult.rows_written)} 行</span>
-              </div>
+          {/* サマリ */}
+          {monthlySummary && (
+            <div
+              className={`rounded-md border p-3 text-sm ${
+                monthlySummary.fail > 0
+                  ? "border-amber-200 bg-amber-50/50 text-amber-800"
+                  : "border-green-200 bg-green-50/50 text-green-800"
+              }`}
+            >
+              成功 {formatNumber(monthlySummary.success)} 件・失敗 {formatNumber(monthlySummary.fail)} 件
+              {monthlySummary.fail > 0 && "（失敗した行は内容を直して「まとめて取り込み」で再実行できます）"}
             </div>
           )}
         </CardContent>
