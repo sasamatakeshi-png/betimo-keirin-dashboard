@@ -16,7 +16,11 @@ import {
   YAxis,
 } from "recharts";
 
-import type { MonthlyDemographicsResponse, MonthlySegment } from "@/types/dashboard";
+import type {
+  DemographicItem,
+  MonthlyDemographicsResponse,
+  MonthlySegment,
+} from "@/types/dashboard";
 
 const GENDER_COLOR: Record<string, string> = {
   male: "#2563eb", // 青
@@ -43,6 +47,22 @@ function ymLabel(ym: string | null): string {
   return m ? `${Number(m[1])}年${Number(m[2])}月時点` : ym;
 }
 
+// 2 つの内訳が（年齢層×性別の views_pct まで）完全一致かどうか。
+// 月によっては YouTube の「全体」エクスポートが「ライブ」と同一になる（ライブが視聴の大半を占める月）。
+// その場合は全体/ライブで見た目が変わらず混乱するため、注記を出すための判定に使う。
+function sameBreakdown(
+  a: MonthlyDemographicsResponse | undefined,
+  b: MonthlyDemographicsResponse | undefined,
+): boolean {
+  const A = a?.items ?? [];
+  const B = b?.items ?? [];
+  if (A.length === 0 || A.length !== B.length) return false;
+  const key = (it: DemographicItem) => `${it.age_band}|${it.gender}`;
+  const mb = new Map(B.map((it) => [key(it), it.views_pct ?? 0]));
+  if (mb.size !== A.length) return false;
+  return A.every((it) => mb.get(key(it)) === (it.views_pct ?? 0));
+}
+
 export function MonthlyDemographicsChart({
   dataBySegment,
   loading = false,
@@ -56,6 +76,11 @@ export function MonthlyDemographicsChart({
 }) {
   const [segment, setSegment] = useState<MonthlySegment>("all");
   const resp = dataBySegment?.[segment];
+
+  // この月は「全体」と「ライブ」の内訳が元データ上まったく同一か。
+  // 同一なら全体↔ライブで表示が変わらないため、バグではなく元データである旨を注記する。
+  const allEqualsLive = sameBreakdown(dataBySegment?.all, dataBySegment?.live);
+  const showSameNote = allEqualsLive && (segment === "all" || segment === "live");
 
   // 年齢層 × 性別 → views_pct を組み立て（年齢順に整列）
   const byAge: Record<string, { age: string; male: number; female: number; other: number }> = {};
@@ -82,6 +107,12 @@ export function MonthlyDemographicsChart({
         <SegmentToggle segment={segment} onChange={setSegment} />
         <span className="text-xs text-muted-foreground">{ymLabel(resp?.year_month ?? yearMonth)}・視聴回数%</span>
       </div>
+
+      {showSameNote && (
+        <p className="rounded-md bg-amber-50 px-3 py-1.5 text-xs text-amber-700 ring-1 ring-amber-200">
+          この月は「全体」と「ライブ」の元データ内訳が同一のため、両者で同じグラフになります。
+        </p>
+      )}
 
       {loading && data.length === 0 ? (
         <div className="flex h-[300px] items-center justify-center text-sm text-muted-foreground">
