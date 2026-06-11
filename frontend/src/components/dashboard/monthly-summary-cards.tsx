@@ -1,7 +1,9 @@
 "use client";
 
-// チャンネル全体サマリ（5枚）。各カードに「累計(全期間)」と「最新月(先月比つき)」を併記。
-// 累計はカウント系の単純合算。比率系は累計に出さない（合算不可のため）。
+// チャンネル全体サマリ（5枚）。各カードに「累計(全期間)」と「単月(前月比つき)」を併記。
+// 累計はカウント系の単純合算で、対象月セレクタとは無関係に全期間固定。
+// 単月部分は対象月セレクタ（selectedMonth）に連動し、選択月＋直前月との比較を表示。
+// 比率系は累計に出さない（合算不可のため）。
 
 import { Card, CardContent } from "@/components/ui/card";
 import { formatChangeBadge, formatNumber } from "@/lib/format";
@@ -34,6 +36,26 @@ function ymLabel(ym: string | undefined): string {
   return m ? `${Number(m[1])}年${Number(m[2])}月` : ym;
 }
 
+// 前月比の比較対象を「N月比」形式で（例: '2026-02' → '2月比'）
+function compareLabel(ym: string | undefined): string | null {
+  if (!ym) return null;
+  const m = /^(\d{4})-(\d{2})$/.exec(ym);
+  return m ? `${Number(m[2])}月比` : null;
+}
+
+// 指定月の行と、その直前（配列上ひとつ前）の行を返す。
+// 月が見つからない場合は末尾（最新月）にフォールバック。
+function pickMonth<T extends { year_month: string }>(
+  items: T[],
+  ym: string | null,
+): { current: T | undefined; prev: T | undefined } {
+  if (ym) {
+    const idx = items.findIndex((x) => x.year_month === ym);
+    if (idx >= 0) return { current: items[idx], prev: idx > 0 ? items[idx - 1] : undefined };
+  }
+  return { current: items.at(-1), prev: items.at(-2) };
+}
+
 type NumKey =
   | "view_count"
   | "impressions"
@@ -60,6 +82,7 @@ function SummaryCard({
   prev,
   unit,
   monthLabel,
+  compareLabel: cmpLabel,
   children,
 }: {
   label: string;
@@ -68,6 +91,7 @@ function SummaryCard({
   prev: number | null;
   unit?: string;
   monthLabel: string;
+  compareLabel?: string | null;
   children?: React.ReactNode;
 }) {
   const badge = formatChangeBadge(changeRatio(latest, prev));
@@ -91,11 +115,16 @@ function SummaryCard({
             </div>
           </div>
           {badge && (
-            <span
-              className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${BADGE_STYLE[badge.direction]}`}
-            >
-              {badge.text}
-            </span>
+            <div className="flex shrink-0 flex-col items-end gap-0.5">
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-medium tabular-nums ${BADGE_STYLE[badge.direction]}`}
+              >
+                {badge.text}
+              </span>
+              {cmpLabel && (
+                <span className="text-[10px] text-muted-foreground">{cmpLabel}</span>
+              )}
+            </div>
           )}
         </div>
         {children}
@@ -107,17 +136,19 @@ function SummaryCard({
 export function MonthlySummaryCards({
   metrics,
   counts,
+  selectedMonth = null,
 }: {
   metrics: MonthlyMetricPoint[];
   counts: MonthlyVideoCountPoint[];
+  // 単月部分の対象月（'YYYY-MM'）。null/未指定なら最新月。累計部分には影響しない。
+  selectedMonth?: string | null;
 }) {
-  const latest = metrics.at(-1);
-  const prev = metrics.at(-2);
+  const { current: latest, prev } = pickMonth(metrics, selectedMonth);
   const monthLabel = ymLabel(latest?.year_month);
+  const cmpLabel = compareLabel(prev?.year_month);
 
-  // 本数（video-counts）
-  const cntLatest = counts.at(-1);
-  const cntPrev = counts.at(-2);
+  // 本数（video-counts）も同じ対象月に合わせる
+  const { current: cntLatest, prev: cntPrev } = pickMonth(counts, selectedMonth);
   const cntCumulative = counts.reduce((a, x) => a + x.total, 0);
   const cntBreakdown: Record<string, number> = {};
   for (const c of counts) {
@@ -134,6 +165,7 @@ export function MonthlySummaryCards({
         latest={latest?.impressions ?? null}
         prev={prev?.impressions ?? null}
         monthLabel={monthLabel}
+        compareLabel={cmpLabel}
       />
       <SummaryCard
         label="再生数"
@@ -141,6 +173,7 @@ export function MonthlySummaryCards({
         latest={latest?.view_count ?? null}
         prev={prev?.view_count ?? null}
         monthLabel={monthLabel}
+        compareLabel={cmpLabel}
       />
       <SummaryCard
         label="登録増"
@@ -148,6 +181,7 @@ export function MonthlySummaryCards({
         latest={latest?.subscribers ?? null}
         prev={prev?.subscribers ?? null}
         monthLabel={monthLabel}
+        compareLabel={cmpLabel}
       />
       <SummaryCard
         label="総再生時間"
@@ -156,6 +190,7 @@ export function MonthlySummaryCards({
         prev={prev?.total_watch_time_hours ?? null}
         unit="時間"
         monthLabel={monthLabel}
+        compareLabel={cmpLabel}
       />
       <SummaryCard
         label="本数"
@@ -164,6 +199,7 @@ export function MonthlySummaryCards({
         prev={cntPrev?.total ?? null}
         unit="本"
         monthLabel={ymLabel(cntLatest?.year_month)}
+        compareLabel={compareLabel(cntPrev?.year_month)}
       >
         {/* 累計の内訳 */}
         <div className="mt-2 flex flex-wrap gap-1 border-t pt-2">

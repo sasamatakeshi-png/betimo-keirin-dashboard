@@ -1,7 +1,8 @@
 "use client";
 
-// 性別・年齢グラフ。最新月の views_pct を年齢層ごとに性別色分け（隣接バー）。
-// segment 切替は独立（デフォルト全体）。
+// 性別・年齢グラフ。対象月の views_pct を年齢層ごとに性別色分け（隣接バー）。
+// 表示月は親（対象月セレクタ）が決め、dataBySegment にその月のデータが渡る。
+// segment 切替（全体/ライブ/ショート）はこのコンポーネント内で独立（デフォルト全体）。
 
 import { useState } from "react";
 import {
@@ -44,11 +45,17 @@ function ymLabel(ym: string | null): string {
 
 export function MonthlyDemographicsChart({
   dataBySegment,
+  loading = false,
+  yearMonth = null,
 }: {
-  dataBySegment: Record<MonthlySegment, MonthlyDemographicsResponse>;
+  dataBySegment: Record<MonthlySegment, MonthlyDemographicsResponse> | undefined;
+  // 対象月変更にともなう再フェッチ中フラグ
+  loading?: boolean;
+  // 再フェッチ中など resp 未取得時に見出しへ表示する対象月（'YYYY-MM'）
+  yearMonth?: string | null;
 }) {
   const [segment, setSegment] = useState<MonthlySegment>("all");
-  const resp = dataBySegment[segment];
+  const resp = dataBySegment?.[segment];
 
   // 年齢層 × 性別 → views_pct を組み立て（年齢順に整列）
   const byAge: Record<string, { age: string; male: number; female: number; other: number }> = {};
@@ -73,10 +80,14 @@ export function MonthlyDemographicsChart({
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2">
         <SegmentToggle segment={segment} onChange={setSegment} />
-        <span className="text-xs text-muted-foreground">{ymLabel(resp?.year_month ?? null)}・視聴回数%</span>
+        <span className="text-xs text-muted-foreground">{ymLabel(resp?.year_month ?? yearMonth)}・視聴回数%</span>
       </div>
 
-      {data.length === 0 ? (
+      {loading && data.length === 0 ? (
+        <div className="flex h-[300px] items-center justify-center text-sm text-muted-foreground">
+          読み込み中…
+        </div>
+      ) : data.length === 0 ? (
         <div className="flex h-[300px] items-center justify-center text-sm text-muted-foreground">
           データがありません
         </div>
