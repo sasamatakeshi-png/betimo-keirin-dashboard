@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import calendar
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy import Date, and_, cast, func, select
@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from app.core.db import get_db
 from app.models import (
     Channel,
+    ChannelStatsDaily,
     Event,
     IngestionLog,
     LatestMetricValue,
@@ -27,6 +28,7 @@ from app.models import (
     Video,
 )
 from app.schemas.dashboard import (
+    ChannelStatsResponse,
     DemographicItem,
     EventMarker,
     HomeKpis,
@@ -41,6 +43,10 @@ from app.schemas.dashboard import (
     RecentEvent,
     ViewsTrendPoint,
 )
+from app.services.youtube_stats import YouTubeStatsError, refresh_channel_stats
+
+# 遅延更新のしきい値。最新取得がこれより古ければ再取得を試みる。
+_STATS_STALE_AFTER = timedelta(hours=24)
 
 _SEGMENTS = ("all", "live", "short")
 
@@ -361,6 +367,58 @@ def monthly_demographics(
     ]
     return MonthlyDemographicsResponse(
         year_month=target_ym, segment=segment, items=items
+    )
+
+
+def _latest_channel_stats(db: Session, channel_id) -> ChannelStatsDaily | None:
+    return db.scalar(
+        select(ChannelStatsDaily)
+        .where(ChannelStatsDaily.channel_id == channel_id)
+        .order_by(ChannelStatsDaily.snapshot_date.desc())
+        .limit(1)
+    )
+
+
+@router.get("/channel-stats", response_model=ChannelStatsResponse)
+def channel_stats(db: Session = Depends(get_db)) -> ChannelStatsResponse:
+    """チャンネル全体の最新スナップショット（総登録者数・総再生数）を返す。
+
+    遅延更新（主軸）:
+      - 最新 fetched_at が24時間以上前 or レコード無し なら YouTube API で再取得を試みる。
+      - 同時アクセスの二重取得は upsert の ON CONFLICT で実害なし（最後の値で1行）。
+      - 取得失敗・キー未設定でも例外を投げず、既存の最新スナップショットを返す。
+        それも無ければ全フィールド None（フロントは CSV 合算値にフォールバック）。
+    """
+    channel_id = _own_channel_id(db)
+    if channel_id is None:
+        return ChannelStatsResponse()
+
+    latest = _latest_channel_stats(db, channel_id)
+    is_stale = (
+        latest is None
+        or latest.fetched_at is None
+        or (datetime.now(timezone.utc) - latest.fetched_at) > _STATS_STALE_AFTER
+    )
+
+    if is_stale:
+        try:
+            refreshed = refresh_channel_stats(db)
+            if refreshed is not None:
+                latest = refreshed
+        except YouTubeStatsError:
+            # 取得失敗（キー未設定・API エラー等）。失敗ログは service 側で記録済み。
+            # 既存スナップショットを返すため、念のため最新を読み直す。
+            latest = _latest_channel_stats(db, channel_id)
+
+    if latest is None:
+        return ChannelStatsResponse(channel_id=channel_id)
+
+    return ChannelStatsResponse(
+        channel_id=latest.channel_id,
+        snapshot_date=latest.snapshot_date,
+        subscriber_count=latest.subscriber_count,
+        view_count=latest.view_count,
+        fetched_at=latest.fetched_at,
     )
 
 

@@ -153,3 +153,20 @@ class MonthlyVideoCountPoint(BaseModel):
 
 class MonthlyVideoCountsResponse(BaseModel):
     items: list[MonthlyVideoCountPoint]  # year_month 昇順
+
+
+# ----- チャンネル全体スナップショット（YouTube API 累計値） -----
+
+
+class ChannelStatsResponse(BaseModel):
+    """総登録者数・総再生数の最新スナップショット（YouTube API 由来）。
+
+    値が無い（未取得/キー未設定/チャンネル未登録）場合は各フィールド None。
+    フロントは None のときフロント側で CSV 合算値にフォールバックする。
+    """
+
+    channel_id: UUID | None = None
+    snapshot_date: date | None = None  # 'YYYY-MM-DD'（JST 取得日）
+    subscriber_count: int | None = None  # 総登録者数（現在の累計）
+    view_count: int | None = None  # 総再生数（生涯累計）
+    fetched_at: datetime | None = None  # 実取得時刻（UTC）

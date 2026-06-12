@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     # AI 分析で使用する Claude モデル（既定は最新 Opus。env で上書き可）
     ANALYSIS_MODEL: str = "claude-opus-4-8"
 
+    # YouTube Data API v3 キー（チャンネル統計の取得に使用）。
+    # 未設定でもアプリは起動する。取得時にキーが無ければ明示エラーで失敗し、
+    # ホーム表示は CSV 合算値にフォールバックする（アプリ全体は落とさない）。
+    YOUTUBE_API_KEY: str = ""
+
     # フロントエンドの許可オリジン（CORS）
     FRONTEND_ORIGIN: str = "http://localhost:3000"
 

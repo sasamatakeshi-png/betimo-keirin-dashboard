@@ -101,3 +101,14 @@ export interface MonthlyVideoCountPoint {
 export interface MonthlyVideoCountsResponse {
   items: MonthlyVideoCountPoint[]; // year_month 昇順
 }
+
+// GET /api/dashboard/channel-stats
+// 総登録者数・総再生数の最新スナップショット（YouTube API 由来）。
+// 値が取れない場合は各フィールド null（フロントは CSV 合算値にフォールバック）。
+export interface ChannelStatsResponse {
+  channel_id: string | null;
+  snapshot_date: string | null; // 'YYYY-MM-DD'（JST 取得日）
+  subscriber_count: number | null; // 総登録者数（現在の累計）
+  view_count: number | null; // 総再生数（生涯累計）
+  fetched_at: string | null; // ISO 8601（UTC）
+}

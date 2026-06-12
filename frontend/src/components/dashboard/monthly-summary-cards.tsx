@@ -4,10 +4,17 @@
 // 累計はカウント系の単純合算で、対象月セレクタとは無関係に全期間固定。
 // 単月部分は対象月セレクタ（selectedMonth）に連動し、選択月＋直前月との比較を表示。
 // 比率系は累計に出さない（合算不可のため）。
+//
+// 例外（YouTube API ハイブリッド）:
+//   - 「総登録者数」「再生数」の累計欄は、API で取得した現在の累計値を優先表示する
+//     （channelStats）。API値が無い（キー未設定/取得失敗）ときは従来のCSV合算へ
+//     フォールバックして表示が壊れないようにする。
+//   - 「総再生時間」「インプレッション」「本数」は API に無いため CSV 合算のまま。
 
 import { Card, CardContent } from "@/components/ui/card";
-import { formatChangeBadge, formatNumber } from "@/lib/format";
+import { formatChangeBadge, formatDate, formatNumber } from "@/lib/format";
 import type {
+  ChannelStatsResponse,
   MonthlyMetricPoint,
   MonthlyVideoCountPoint,
 } from "@/types/dashboard";
@@ -78,6 +85,7 @@ function changeRatio(
 function SummaryCard({
   label,
   cumulative,
+  cumulativeLabel = "累計（全期間）",
   latest,
   prev,
   unit,
@@ -87,6 +95,8 @@ function SummaryCard({
 }: {
   label: string;
   cumulative: number;
+  // 大きい数値の下に出す注記（既定「累計（全期間）」。API由来なら取得日等を渡す）
+  cumulativeLabel?: string;
   latest: number | null;
   prev: number | null;
   unit?: string;
@@ -99,12 +109,12 @@ function SummaryCard({
     <Card className="border-l-4 border-l-blue-500">
       <CardContent className="px-5 py-4">
         <div className="text-sm text-muted-foreground">{label}</div>
-        {/* 累計（全期間） */}
+        {/* 累計（または API 現在値） */}
         <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">
           {formatNumber(cumulative)}
           {unit && <span className="ml-1 text-base font-normal text-muted-foreground">{unit}</span>}
         </div>
-        <div className="text-[11px] text-muted-foreground">累計（全期間）</div>
+        <div className="text-[11px] text-muted-foreground">{cumulativeLabel}</div>
         {/* 最新月 + 先月比 */}
         <div className="mt-2 flex items-center justify-between gap-2 border-t pt-2">
           <div className="min-w-0">
@@ -136,10 +146,13 @@ function SummaryCard({
 export function MonthlySummaryCards({
   metrics,
   counts,
+  channelStats = null,
   selectedMonth = null,
 }: {
   metrics: MonthlyMetricPoint[];
   counts: MonthlyVideoCountPoint[];
+  // 総登録者数・総再生数の最新スナップショット（YouTube API）。null なら CSV にフォールバック。
+  channelStats?: ChannelStatsResponse | null;
   // 単月部分の対象月（'YYYY-MM'）。null/未指定なら最新月。累計部分には影響しない。
   selectedMonth?: string | null;
 }) {
@@ -157,6 +170,18 @@ export function MonthlySummaryCards({
     }
   }
 
+  // 「再生数」「総登録者数」の累計欄: API値を優先し、無ければ CSV 合算へフォールバック。
+  const apiViews = channelStats?.view_count ?? null;
+  const apiSubs = channelStats?.subscriber_count ?? null;
+  const snapDate = channelStats?.snapshot_date ?? null;
+  // API由来のときは出所と取得日を注記、無ければ従来の累計（CSV）扱いと分かる注記。
+  const apiNote = (apiValue: number | null) =>
+    apiValue != null
+      ? snapDate
+        ? `YouTube・${formatDate(snapDate)}時点`
+        : "YouTube（最新値）"
+      : "累計（CSV合算）";
+
   return (
     <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       <SummaryCard
@@ -169,15 +194,17 @@ export function MonthlySummaryCards({
       />
       <SummaryCard
         label="再生数"
-        cumulative={sumCol(metrics, "view_count")}
+        cumulative={apiViews ?? sumCol(metrics, "view_count")}
+        cumulativeLabel={apiNote(apiViews)}
         latest={latest?.view_count ?? null}
         prev={prev?.view_count ?? null}
         monthLabel={monthLabel}
         compareLabel={cmpLabel}
       />
       <SummaryCard
-        label="登録増"
-        cumulative={sumCol(metrics, "subscribers")}
+        label="総登録者数"
+        cumulative={apiSubs ?? sumCol(metrics, "subscribers")}
+        cumulativeLabel={apiNote(apiSubs)}
         latest={latest?.subscribers ?? null}
         prev={prev?.subscribers ?? null}
         monthLabel={monthLabel}

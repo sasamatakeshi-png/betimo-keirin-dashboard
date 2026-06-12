@@ -16,6 +16,7 @@ import { RecentEventsList } from "@/components/dashboard/recent-events";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
+  getChannelStats,
   getDashboardHome,
   getMonthlyDemographics,
   getMonthlyMetrics,
@@ -23,6 +24,7 @@ import {
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
 import type {
+  ChannelStatsResponse,
   HomeResponse,
   MonthlyDemographicsResponse,
   MonthlyMetricPoint,
@@ -61,6 +63,8 @@ interface HomeData {
   demographics: Record<MonthlySegment, MonthlyDemographicsResponse>;
   counts: MonthlyVideoCountPoint[];
   home: HomeResponse;
+  // 総登録者数・総再生数の最新スナップショット（取得不可なら null＝CSV値で表示）
+  channelStats: ChannelStatsResponse | null;
 }
 
 export default function HomePage() {
@@ -73,7 +77,7 @@ export default function HomePage() {
     setLoading(true);
     setError(null);
     try {
-      const [mAll, mLive, mShort, dAll, dLive, dShort, counts, home] =
+      const [mAll, mLive, mShort, dAll, dLive, dShort, counts, home, channelStats] =
         await Promise.all([
           getMonthlyMetrics("all"),
           getMonthlyMetrics("live"),
@@ -83,12 +87,15 @@ export default function HomePage() {
           getMonthlyDemographics("short"),
           getMonthlyVideoCounts(),
           getDashboardHome(),
+          // YouTube 取得（遅延更新つき）は失敗してもホーム全体を落とさない
+          getChannelStats().catch(() => null),
         ]);
       setData({
         metrics: { all: mAll.items, live: mLive.items, short: mShort.items },
         demographics: { all: dAll, live: dLive, short: dShort },
         counts: counts.items,
         home,
+        channelStats,
       });
       setUpdatedAt(new Date());
     } catch (e) {
@@ -187,6 +194,7 @@ function DashboardContent({ data }: { data: HomeData }) {
       <MonthlySummaryCards
         metrics={data.metrics.all}
         counts={data.counts}
+        channelStats={data.channelStats}
         selectedMonth={selectedMonth}
       />
 

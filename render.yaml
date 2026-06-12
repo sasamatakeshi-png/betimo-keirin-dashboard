@@ -24,3 +24,5 @@ services:
         sync: false
       - key: ANALYSIS_MODEL # 例: claude-opus-4-8（コード側デフォルトと同じ）
         sync: false
+      - key: YOUTUBE_API_KEY # YouTube Data API v3 キー（総登録者数/総再生数の取得用）
+        sync: false

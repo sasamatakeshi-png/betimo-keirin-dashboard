@@ -8,6 +8,7 @@ import type {
   AnalysisTemplate,
 } from "@/types/analysis";
 import type {
+  ChannelStatsResponse,
   HomeResponse,
   MonthlyDemographicsResponse,
   MonthlyMetricsResponse,
@@ -154,6 +155,14 @@ export function getMonthlyDemographics(
 
 export function getMonthlyVideoCounts(): Promise<MonthlyVideoCountsResponse> {
   return apiGet<MonthlyVideoCountsResponse>("/api/dashboard/monthly-video-counts");
+}
+
+// 総登録者数・総再生数の最新スナップショット（YouTube API。認証不要GET）。
+// サーバ側で「最終取得が24h超なら再取得」する遅延更新つき。取得失敗でも
+// 既存値 or null を返すため、呼び出し側は通常 catch 不要だが、ホーム全体を
+// 守るため page 側では .catch(() => null) で握って描画を継続する。
+export function getChannelStats(): Promise<ChannelStatsResponse> {
+  return apiGet<ChannelStatsResponse>("/api/dashboard/channel-stats");
 }
 
 export function getVideos(params?: QueryParams): Promise<Page<Video>> {

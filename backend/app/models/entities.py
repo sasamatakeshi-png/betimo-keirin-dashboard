@@ -216,6 +216,28 @@ class MonthlyDemographic(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class ChannelStatsDaily(Base):
+    """チャンネル全体の日次スナップショット（YouTube API の累計値）。
+
+    004_channel_stats_daily.sql で新設。subscriber_count / view_count は
+    statistics の「現在の累計値」（= 生涯合計）で、月次CSVの当月値とは別物。
+    (channel_id, snapshot_date) で日次1行・冪等 upsert。
+    """
+
+    __tablename__ = "channel_stats_daily"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
+    channel_id = Column(UUID(as_uuid=True), ForeignKey("channels.id"), nullable=False)
+    snapshot_date = Column(Date, nullable=False)  # JST 基準の取得日
+    subscriber_count = Column(BigInteger)
+    view_count = Column(BigInteger)
+    video_count = Column(Integer)
+    fetched_at = Column(DateTime(timezone=True), nullable=False)
+    source = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class LatestMetricValue(Base):
     """ビュー latest_metric_values への読み取り専用マッピング。
 

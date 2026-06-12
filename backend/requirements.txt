@@ -6,6 +6,7 @@ psycopg[binary]
 pydantic
 pydantic-settings
 python-dotenv
+requests
 openpyxl
 pdfplumber
 anthropic
