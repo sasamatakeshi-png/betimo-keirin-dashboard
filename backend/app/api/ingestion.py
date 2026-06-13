@@ -12,7 +12,12 @@ from app.core.db import get_db
 from app.core.security import get_current_auth
 from app.models import IngestionLog
 from app.schemas.common import Page, Pagination, pagination
-from app.schemas.ingestion import IngestionLogOut, MonthlyUploadResult, UploadResult
+from app.schemas.ingestion import (
+    IngestionLogOut,
+    MonthlyUploadResult,
+    MonthlyVideoUploadResult,
+    UploadResult,
+)
 from app.services.ingestion import (
     INGEST_TYPES,
     SHORT_INGEST_TYPES,
@@ -25,6 +30,7 @@ from app.services.monthly_ingestion import (
     MonthlyIngestError,
     ingest_monthly_demographics_csv,
     ingest_monthly_metrics_csv,
+    ingest_monthly_video_csv,
 )
 
 router = APIRouter(prefix="/ingestion", tags=["ingestion"])
@@ -110,6 +116,39 @@ async def upload_monthly_csv(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
     return MonthlyUploadResult(**result)
+
+
+@router.post(
+    "/monthly-video",
+    response_model=MonthlyVideoUploadResult,
+    dependencies=[Depends(get_current_auth)],
+)
+async def upload_monthly_video_csv(
+    file: UploadFile = File(...),
+    year_month: str = Form(..., description="対象月 'YYYY-MM'"),
+    db: Session = Depends(get_db),
+) -> MonthlyVideoUploadResult:
+    """動画別CSV（コンテンツ別エクスポート）を「月 × 動画」で取り込む。
+
+    is_ad は title に "WebCM" を含むかで判定。合計行・ID空行はスキップ。
+    """
+    if not _YEAR_MONTH_RE.match(year_month):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="year_month must be 'YYYY-MM'",
+        )
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="empty file"
+        )
+    try:
+        result = ingest_monthly_video_csv(db, content, file.filename, year_month)
+    except MonthlyIngestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return MonthlyVideoUploadResult(**result)
 
 
 @router.get(

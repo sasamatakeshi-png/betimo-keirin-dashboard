@@ -13,6 +13,7 @@ import type {
   MonthlyDemographicsResponse,
   MonthlyMetricsResponse,
   MonthlyVideoCountsResponse,
+  WebcmMonthlyResponse,
 } from "@/types/dashboard";
 import type { EventSummary } from "@/types/event-summary";
 import type {
@@ -21,6 +22,7 @@ import type {
   MonthlyKind,
   MonthlySegment,
   MonthlyUploadResult,
+  MonthlyVideoUploadResult,
   ShortIngestType,
   UploadResult,
 } from "@/types/ingestion";
@@ -155,6 +157,11 @@ export function getMonthlyDemographics(
 
 export function getMonthlyVideoCounts(): Promise<MonthlyVideoCountsResponse> {
   return apiGet<MonthlyVideoCountsResponse>("/api/dashboard/monthly-video-counts");
+}
+
+// WebCM（広告）の月別再生数（monthly_video_metrics の is_ad=true 集計。確認用）。
+export function getWebcmMonthly(): Promise<WebcmMonthlyResponse> {
+  return apiGet<WebcmMonthlyResponse>("/api/dashboard/webcm-monthly");
 }
 
 // 総登録者数・総再生数の最新スナップショット（YouTube API。認証不要GET）。
@@ -309,6 +316,41 @@ export async function uploadMonthlyCsv(
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as MonthlyUploadResult;
+}
+
+// 動画別CSV（月 × 動画）の投入（要ログイン）。file / year_month を multipart で送る。
+export async function uploadMonthlyVideoCsv(
+  file: File,
+  yearMonth: string,
+): Promise<MonthlyVideoUploadResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("year_month", yearMonth);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/ingestion/monthly-video", API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as MonthlyVideoUploadResult;
 }
 
 // ショート専用CSVの投入（要ログイン）。通常CSVと同じ /upload に別 type で送る。

@@ -15,9 +15,11 @@ from __future__ import annotations
 import re
 
 from app.services.parsers.common import (
+    ID_KEYWORDS,
     decode_csv_bytes,
     find_col,
     parse_count,
+    parse_datetime_jst,
     parse_duration_seconds,
     read_rows,
 )
@@ -144,6 +146,107 @@ def parse_monthly_metrics_csv(content: bytes) -> dict[str, float | int]:
         if v is not None:
             metrics[key] = v
     return metrics
+
+
+# =====================================================================
+# 動画別CSV（YouTube Studio コンテンツ別エクスポート）パーサ
+#   各行 = 1動画。先頭の合計行（コンテンツID空 or「合計」）はスキップ。
+#   返り値の % は生の % 値（monthly 系と統一。/100 しない）。
+# =====================================================================
+
+# 動画別CSV: DB列 → (ヘッダー includes, excludes)。
+_VIDEO_COUNT_COLS: dict[str, tuple[list[str], tuple[str, ...]]] = {
+    "view_count": (["視聴回数", "再生数", "views"], ("率", "平均", "維持")),
+    "impressions": (["インプレッション", "imp"], ("クリック", "率", "ctr")),
+    "unique_viewers": (["ユニーク視聴者", "ユニーク", "unique"], ()),
+    "new_viewers": (["新しい視聴者", "新規"], ()),
+    "repeat_viewers": (["リピーター"], ("比率", "率", "ratio")),
+}
+_VIDEO_DURATION_COLS: dict[str, tuple[list[str], tuple[str, ...]]] = {
+    "avg_view_duration_seconds": (["平均視聴時間", "視聴時間"], ("総", "率", "合計")),
+}
+_VIDEO_NUMBER_COLS: dict[str, tuple[list[str], tuple[str, ...]]] = {
+    "total_watch_time_hours": (["総再生時間", "総視聴時間"], ("平均",)),
+}
+_VIDEO_PERCENT_COLS: dict[str, tuple[list[str], tuple[str, ...]]] = {
+    "avg_view_percentage": (["平均視聴率", "視聴維持率", "維持率", "再生率"], ("時間",)),
+}
+
+
+def parse_monthly_video_csv(content: bytes) -> list[dict]:
+    """動画別CSVをパースして「動画ごと」の dict リストを返す。
+
+    返り値: [{ "youtube_video_id": str|None, "title": str|None,
+               "published_at": datetime|None, "content_label": str|None,
+               "metrics": { DB列名: 値, ... } }, ...]
+    - 先頭列(コンテンツID)が空 or「合計」等の行（合計行）はスキップ。
+    - 空セル・非数は metrics に含めない（null≠0）。
+    - % は生の % 値（parse_percent_raw）。総再生時間は float。平均視聴時間は秒。
+    """
+    text = decode_csv_bytes(content)
+    rows = read_rows(text)
+    if not rows or len(rows) < 2:
+        return []
+
+    headers_lower = [h.strip().lower() for h in rows[0]]
+
+    id_idx = find_col(headers_lower, ID_KEYWORDS)
+    if id_idx is None:
+        id_idx = 0
+    title_idx = find_col(headers_lower, ["動画のタイトル", "タイトル", "title"])
+    published_idx = find_col(headers_lower, ["公開", "publish"])
+    # 「長さ」（補助ラベル）。「平均視聴時間」と区別するため平均/視聴を除外
+    length_idx = find_col(headers_lower, ["長さ", "duration"], ("平均", "視聴"))
+
+    count_idx = _resolve(headers_lower, _VIDEO_COUNT_COLS)
+    dur_idx = _resolve(headers_lower, _VIDEO_DURATION_COLS)
+    num_idx = _resolve(headers_lower, _VIDEO_NUMBER_COLS)
+    pct_idx = _resolve(headers_lower, _VIDEO_PERCENT_COLS)
+
+    def cell(row: list[str], idx: int | None) -> str | None:
+        if idx is None or idx >= len(row):
+            return None
+        return row[idx]
+
+    out: list[dict] = []
+    for row in rows[1:]:
+        if not row:
+            continue
+        ident = (cell(row, id_idx) or "").strip()
+        # 合計行（コンテンツID 空 or「合計」等）はスキップ
+        if _is_total_identifier(ident):
+            continue
+
+        metrics: dict[str, float | int] = {}
+        for key, idx in count_idx.items():
+            v = parse_count(cell(row, idx))
+            if v is not None:
+                metrics[key] = v
+        for key, idx in dur_idx.items():
+            v = parse_duration_seconds(cell(row, idx))
+            if v is not None:
+                metrics[key] = v
+        for key, idx in num_idx.items():
+            v = parse_number(cell(row, idx))
+            if v is not None:
+                metrics[key] = v
+        for key, idx in pct_idx.items():
+            v = parse_percent_raw(cell(row, idx))
+            if v is not None:
+                metrics[key] = v
+
+        title_raw = cell(row, title_idx)
+        length_raw = cell(row, length_idx)
+        out.append(
+            {
+                "youtube_video_id": ident,
+                "title": title_raw.strip() if title_raw else None,
+                "published_at": parse_datetime_jst(cell(row, published_idx)),
+                "content_label": length_raw.strip() if length_raw else None,
+                "metrics": metrics,
+            }
+        )
+    return out
 
 
 # ---- 年齢層・性別の日本語表記 → DB値マッピング ----

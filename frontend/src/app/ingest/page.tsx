@@ -12,6 +12,7 @@ import {
   getIngestionLogs,
   uploadIngestionCsv,
   uploadMonthlyCsv,
+  uploadMonthlyVideoCsv,
   uploadShortCsv,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
@@ -21,6 +22,7 @@ import type {
   IngestType,
   MonthlyKind,
   MonthlySegment,
+  MonthlyVideoUploadResult,
   ShortIngestType,
   UploadResult,
 } from "@/types/ingestion";
@@ -187,6 +189,15 @@ export default function IngestPage() {
   );
   const monthlyRowIdRef = useRef(0);
 
+  // 月次・動画別CSV（月 × 動画。WebCM切り出し基盤。他の投入口とは独立）
+  const [videoYearMonth, setVideoYearMonth] = useState<string>(monthlyDefaultYM);
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoDragOver, setVideoDragOver] = useState(false);
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [videoResult, setVideoResult] = useState<MonthlyVideoUploadResult | null>(null);
+  const [videoResultFile, setVideoResultFile] = useState<string | null>(null);
+  const [videoError, setVideoError] = useState<string | null>(null);
+
   const [logs, setLogs] = useState<IngestionLog[]>([]);
   const [logsError, setLogsError] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState(true);
@@ -266,6 +277,33 @@ export default function IngestPage() {
       setShortFile(f);
       setShortResult(null);
       setShortError(null);
+    }
+  }
+
+  async function handleUploadMonthlyVideo() {
+    if (!videoFile || !videoYearMonth || !canEdit || videoUploading) return;
+    setVideoUploading(true);
+    setVideoError(null);
+    setVideoResult(null);
+    try {
+      const r = await uploadMonthlyVideoCsv(videoFile, videoYearMonth);
+      setVideoResult(r);
+      setVideoResultFile(videoFile.name);
+      setVideoFile(null);
+      setLogsLoading(true);
+      void loadLogs();
+    } catch (e) {
+      setVideoError(e instanceof Error ? e.message : "アップロードに失敗しました");
+    } finally {
+      setVideoUploading(false);
+    }
+  }
+
+  function pickVideoFile(f: File | undefined | null) {
+    if (f) {
+      setVideoFile(f);
+      setVideoResult(null);
+      setVideoError(null);
     }
   }
 
@@ -800,6 +838,125 @@ export default function IngestPage() {
             >
               成功 {formatNumber(monthlySummary.success)} 件・失敗 {formatNumber(monthlySummary.fail)} 件
               {monthlySummary.fail > 0 && "（失敗した行は内容を直して「まとめて取り込み」で再実行できます）"}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 月次・動画別CSVアップロード（WebCM切り出し基盤。他の投入口とは独立） */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">月次・動画別CSVアップロード</CardTitle>
+          {authRequired === true && !canEdit && (
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            動画別CSV（YouTube Studio のコンテンツ別エクスポート）を「対象月 × 動画」で投入します。タイトルに「WebCM」を含む動画は広告(is_ad)として記録します。合計行・コンテンツID空の行は取り込みません。同じ月・同じ動画を入れ直すと最新値で置換されます。
+          </p>
+
+          {/* 対象月 */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-muted-foreground" htmlFor="video-month">
+              対象月
+            </label>
+            <select
+              id="video-month"
+              value={videoYearMonth}
+              onChange={(e) => setVideoYearMonth(e.target.value)}
+              disabled={videoUploading}
+              className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+            >
+              {monthOptions.length === 0 && <option value="">—</option>}
+              {monthOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* ファイル選択 */}
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setVideoDragOver(true);
+            }}
+            onDragLeave={() => setVideoDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setVideoDragOver(false);
+              pickVideoFile(e.dataTransfer.files?.[0]);
+            }}
+            className={`flex h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm ${
+              videoDragOver ? "border-blue-400 bg-blue-50/50" : "border-muted-foreground/25 hover:bg-muted/30"
+            }`}
+          >
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                pickVideoFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            {videoFile ? (
+              <>
+                <span className="font-medium">{videoFile.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {formatNumber(videoFile.size)} バイト — クリックで選び直し
+                </span>
+              </>
+            ) : (
+              <>
+                <span>動画別CSVをドロップ、またはクリックして選択</span>
+                <span className="text-xs text-muted-foreground">.csv（UTF-8 / Shift_JIS 両対応）</span>
+              </>
+            )}
+          </label>
+
+          {/* 実行 */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleUploadMonthlyVideo()}
+              disabled={!videoFile || !videoYearMonth || !canEdit || videoUploading}
+              className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {videoUploading ? "投入中…" : "動画別取り込み実行"}
+            </button>
+            {!canEdit && probed && (
+              <span className="text-xs text-muted-foreground">投入にはログインが必要です</span>
+            )}
+          </div>
+
+          {/* 結果 / エラー */}
+          {videoError && (
+            <div className="rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600">
+              {videoError}
+            </div>
+          )}
+          {videoResult && (
+            <div className="rounded-md border border-green-200 bg-green-50/50 p-3 text-sm">
+              <div className="font-medium text-green-800">
+                取り込み完了{videoResultFile ? `: ${videoResultFile}` : ""}（{formatYearMonthLabel(videoResult.year_month)}）
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>保存 {formatNumber(videoResult.rows_written)} 本</span>
+                <span className={videoResult.ad_rows > 0 ? "text-blue-700" : ""}>
+                  WebCM該当 {formatNumber(videoResult.ad_rows)} 本
+                </span>
+                <span>スキップ(合計行/ID空) {formatNumber(videoResult.skipped)} 行</span>
+                {videoResult.replaced && <span>（同月同動画は置換）</span>}
+              </div>
             </div>
           )}
         </CardContent>

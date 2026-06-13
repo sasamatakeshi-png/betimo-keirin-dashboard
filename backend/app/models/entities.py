@@ -195,6 +195,38 @@ class MonthlyChannelMetric(Base):
     updated_at = Column(DateTime(timezone=True), nullable=False)
 
 
+class MonthlyVideoMetric(Base):
+    """月次・動画別の明細（動画別CSVの各動画行を「対象月 × 動画」で1行）。
+
+    005_monthly_video_metrics.sql で新設。数値の正は monthly_channel_metrics
+    （合計）で、本テーブルは月別の動画明細を持つ参照用。
+    is_ad は title に "WebCM" を含むかを取り込み時に判定して格納する。
+    % は生の百分率(例 45.2)のまま格納する。
+    """
+
+    __tablename__ = "monthly_video_metrics"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
+    channel_id = Column(UUID(as_uuid=True), ForeignKey("channels.id"), nullable=False)
+    year_month = Column(Text, nullable=False)  # 'YYYY-MM'
+    youtube_video_id = Column(Text)  # 動画別CSV先頭列(コンテンツID)。NULL可
+    title = Column(Text)
+    published_at = Column(DateTime(timezone=True))
+    content_label = Column(Text)
+    is_ad = Column(Boolean, nullable=False)
+    view_count = Column(BigInteger)
+    impressions = Column(BigInteger)
+    total_watch_time_hours = Column(Numeric)
+    unique_viewers = Column(BigInteger)
+    new_viewers = Column(BigInteger)
+    repeat_viewers = Column(BigInteger)
+    avg_view_duration_seconds = Column(Numeric)
+    avg_view_percentage = Column(Numeric)
+    source = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=False)
+
+
 class MonthlyDemographic(Base):
     """月次・性別年齢分布（各行 = 年齢層 × 性別 × 視聴回数% × 総再生時間%）。
 

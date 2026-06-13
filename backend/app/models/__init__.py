@@ -11,6 +11,7 @@ from app.models.entities import (
     MetricValue,
     MonthlyChannelMetric,
     MonthlyDemographic,
+    MonthlyVideoMetric,
     Video,
 )
 
@@ -25,6 +26,7 @@ __all__ = [
     "LatestMetricValue",
     "MonthlyChannelMetric",
     "MonthlyDemographic",
+    "MonthlyVideoMetric",
     "IngestionLog",
     "AnalysisTemplate",
     "AnalysisResult",

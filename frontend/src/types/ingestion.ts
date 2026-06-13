@@ -19,6 +19,16 @@ export interface MonthlyUploadResult {
   log_id: string;
 }
 
+// POST /api/ingestion/monthly-video のレスポンス（schemas/ingestion.py MonthlyVideoUploadResult と対応）
+export interface MonthlyVideoUploadResult {
+  year_month: string; // 'YYYY-MM'
+  rows_written: number; // 保存した動画行数
+  ad_rows: number; // うち WebCM(is_ad=true) 本数
+  skipped: number; // ID空/合計行などスキップ数
+  replaced: boolean;
+  log_id: string;
+}
+
 export interface UploadResult {
   inserted: number;
   skipped: number;

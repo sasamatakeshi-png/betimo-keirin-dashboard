@@ -22,14 +22,41 @@ from app.models import (
     IngestionLog,
     MonthlyChannelMetric,
     MonthlyDemographic,
+    MonthlyVideoMetric,
 )
 from app.services.parsers import (
     parse_monthly_demographics_csv,
     parse_monthly_metrics_csv,
+    parse_monthly_video_csv,
 )
 
 SEGMENTS = {"all", "live", "short"}
 MONTHLY_KINDS = {"metrics", "demographics"}
+
+# monthly_video_metrics の上書き対象列（id/channel_id/year_month/youtube_video_id/
+# created_at は除く）。再取込で動画属性も最新化する。
+_MVM_UPDATE_COLS = [
+    "title",
+    "published_at",
+    "content_label",
+    "is_ad",
+    "view_count",
+    "impressions",
+    "total_watch_time_hours",
+    "unique_viewers",
+    "new_viewers",
+    "repeat_viewers",
+    "avg_view_duration_seconds",
+    "avg_view_percentage",
+    "source",
+]
+
+
+def _is_webcm_title(title: str | None) -> bool:
+    """タイトルに "WebCM" を含むか（大小無視）。広告(is_ad)判定に使う。"""
+    if not title:
+        return False
+    return "webcm" in title.lower()
 
 # monthly_channel_metrics の上書き対象列（id/channel_id/year_month/segment/created_at は除く）
 _MCM_UPDATE_COLS = [
@@ -191,6 +218,99 @@ def ingest_monthly_demographics_csv(
         "segment": segment,
         "kind": "demographics",
         "rows_written": rows_written,
+        "replaced": True,
+        "log_id": log.id,
+    }
+
+
+def ingest_monthly_video_csv(
+    db: Session, content: bytes, filename: str | None, year_month: str
+) -> dict:
+    """動画別CSVを「対象月 × 動画」で monthly_video_metrics へ冪等 upsert する。
+
+    - 先頭の合計行・コンテンツID空の行はスキップ（report の skipped に計上）。
+    - is_ad は title に "WebCM" を含むかで判定して格納。
+    - 一意キー (channel_id, year_month, youtube_video_id) で ON CONFLICT 上書き。
+    - 同一CSV内に同じ youtube_video_id が複数あった場合は後勝ちで集約
+      （UNIQUE違反による upsert の二重更新を避ける）。
+    """
+    started_at = datetime.now(timezone.utc)
+    channel_id = _resolve_own_channel_id(db)
+
+    records = parse_monthly_video_csv(content)
+
+    # youtube_video_id が無い行は冪等性を担保できないため取り込まない（合計行など）。
+    valid = [r for r in records if (r.get("youtube_video_id") or "").strip()]
+    skipped = len(records) - len(valid)
+
+    # 同一CSV内の youtube_video_id 重複は後勝ちで集約（一意制約の二重更新回避）。
+    dedup: dict[str, dict] = {}
+    for r in valid:
+        dedup[r["youtube_video_id"].strip()] = r
+    deduped = list(dedup.values())
+
+    ad_rows = 0
+    rows_written = 0
+    for r in deduped:
+        is_ad = _is_webcm_title(r.get("title"))
+        if is_ad:
+            ad_rows += 1
+        m = r.get("metrics", {})
+        values = {
+            "channel_id": channel_id,
+            "year_month": year_month,
+            "youtube_video_id": r["youtube_video_id"].strip(),
+            "title": r.get("title"),
+            "published_at": r.get("published_at"),
+            "content_label": r.get("content_label"),
+            "is_ad": is_ad,
+            "view_count": m.get("view_count"),
+            "impressions": m.get("impressions"),
+            "total_watch_time_hours": m.get("total_watch_time_hours"),
+            "unique_viewers": m.get("unique_viewers"),
+            "new_viewers": m.get("new_viewers"),
+            "repeat_viewers": m.get("repeat_viewers"),
+            "avg_view_duration_seconds": m.get("avg_view_duration_seconds"),
+            "avg_view_percentage": m.get("avg_view_percentage"),
+            "source": "monthly_video_csv",
+        }
+        update_set = {col: values.get(col) for col in _MVM_UPDATE_COLS}
+        stmt = (
+            pg_insert(MonthlyVideoMetric)
+            .values(**values)
+            .on_conflict_do_update(
+                index_elements=["channel_id", "year_month", "youtube_video_id"],
+                set_=update_set,
+            )
+            .returning(MonthlyVideoMetric.id)
+        )
+        rows_written += len(db.execute(stmt).fetchall())
+
+    status = "success" if rows_written else "failed"
+    log = IngestionLog(
+        source_type="monthly_video_csv",
+        file_name=filename,
+        records_processed=rows_written,
+        records_failed=skipped,
+        status=status,
+        started_at=started_at,
+        completed_at=datetime.now(timezone.utc),
+        error_log={
+            "year_month": year_month,
+            "ad_rows": ad_rows,
+            "skipped": skipped,
+            "note": None if rows_written else "動画行を抽出できませんでした",
+        },
+    )
+    db.add(log)
+    db.commit()
+    db.refresh(log)
+
+    return {
+        "year_month": year_month,
+        "rows_written": rows_written,
+        "ad_rows": ad_rows,
+        "skipped": skipped,
         "replaced": True,
         "log_id": log.id,
     }

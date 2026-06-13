@@ -30,6 +30,17 @@ class MonthlyUploadResult(BaseModel):
     log_id: UUID
 
 
+class MonthlyVideoUploadResult(BaseModel):
+    """動画別CSV（月 × 動画）取り込み結果。"""
+
+    year_month: str
+    rows_written: int  # 保存した動画行数
+    ad_rows: int  # うち is_ad=true（WebCM）と判定した本数
+    skipped: int  # コンテンツID空/合計行などスキップした行数
+    replaced: bool
+    log_id: UUID
+
+
 class IngestionLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

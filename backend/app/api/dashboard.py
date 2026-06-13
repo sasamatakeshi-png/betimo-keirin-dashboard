@@ -25,6 +25,7 @@ from app.models import (
     LatestMetricValue,
     MonthlyChannelMetric,
     MonthlyDemographic,
+    MonthlyVideoMetric,
     Video,
 )
 from app.schemas.dashboard import (
@@ -42,6 +43,8 @@ from app.schemas.dashboard import (
     MonthlyVideoCountsResponse,
     RecentEvent,
     ViewsTrendPoint,
+    WebcmMonthlyPoint,
+    WebcmMonthlyResponse,
 )
 from app.services.youtube_stats import YouTubeStatsError, refresh_channel_stats
 
@@ -463,3 +466,33 @@ def monthly_video_counts(db: Session = Depends(get_db)) -> MonthlyVideoCountsRes
         for ymk in sorted(buckets)
     ]
     return MonthlyVideoCountsResponse(items=items)
+
+
+@router.get("/webcm-monthly", response_model=WebcmMonthlyResponse)
+def webcm_monthly(db: Session = Depends(get_db)) -> WebcmMonthlyResponse:
+    """WebCM（広告）の月別再生数を返す（確認用）。
+
+    monthly_video_metrics の is_ad=true を year_month で集計し、
+    view_count 合計と本数を返す。view_count が全て NULL の月は 0。
+    第2段階でホームの「WebCMを除く/込む」切り替えに使う材料。
+    """
+    rows = db.execute(
+        select(
+            MonthlyVideoMetric.year_month.label("ym"),
+            func.coalesce(func.sum(MonthlyVideoMetric.view_count), 0).label("views"),
+            func.count().label("n"),
+        )
+        .where(MonthlyVideoMetric.is_ad.is_(True))
+        .group_by(MonthlyVideoMetric.year_month)
+        .order_by(MonthlyVideoMetric.year_month)
+    ).all()
+
+    items = [
+        WebcmMonthlyPoint(
+            year_month=r.ym,
+            webcm_view_count=int(r.views),
+            ad_video_count=int(r.n),
+        )
+        for r in rows
+    ]
+    return WebcmMonthlyResponse(items=items)

@@ -102,6 +102,17 @@ export interface MonthlyVideoCountsResponse {
   items: MonthlyVideoCountPoint[]; // year_month 昇順
 }
 
+// GET /api/dashboard/webcm-monthly（WebCM=広告 の月別再生数。確認用）
+export interface WebcmMonthlyPoint {
+  year_month: string; // 'YYYY-MM'
+  webcm_view_count: number; // is_ad=true の view_count 合計
+  ad_video_count: number; // is_ad=true の本数
+}
+
+export interface WebcmMonthlyResponse {
+  items: WebcmMonthlyPoint[]; // year_month 昇順
+}
+
 // GET /api/dashboard/channel-stats
 // 総登録者数・総再生数の最新スナップショット（YouTube API 由来）。
 // 値が取れない場合は各フィールド null（フロントは CSV 合算値にフォールバック）。

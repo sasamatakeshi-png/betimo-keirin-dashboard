@@ -155,6 +155,21 @@ class MonthlyVideoCountsResponse(BaseModel):
     items: list[MonthlyVideoCountPoint]  # year_month 昇順
 
 
+# ----- WebCM（広告）月別集計（monthly_video_metrics 由来。確認用） -----
+
+
+class WebcmMonthlyPoint(BaseModel):
+    """月別の WebCM 再生数。monthly_video_metrics の is_ad=true を集計。"""
+
+    year_month: str  # 'YYYY-MM'
+    webcm_view_count: int  # その月の is_ad=true の view_count 合計
+    ad_video_count: int  # その月の is_ad=true の動画本数
+
+
+class WebcmMonthlyResponse(BaseModel):
+    items: list[WebcmMonthlyPoint]  # year_month 昇順
+
+
 # ----- チャンネル全体スナップショット（YouTube API 累計値） -----
 
 
