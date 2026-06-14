@@ -39,6 +39,15 @@ _KIND_MAP = {
 
 DELETABLE_KINDS = set(_KIND_MAP)
 
+# 監査ログの source_type は ingestion_logs の CHECK 制約に存在する値しか使えない
+# （スキーマ変更を避けるため）。種別に対応する取り込み用の値を流用し、削除である
+# ことは error_log.action='delete' と file_name で区別する。
+_LOG_SOURCE_TYPE = {
+    "monthly_metrics": "monthly_metrics_csv",
+    "monthly_demographics": "monthly_demographics_csv",
+    "monthly_video": "monthly_video_csv",
+}
+
 
 class MonthlyDeleteError(ValueError):
     """削除入力の不正・前提不足（呼び出し側で 400 に変換する）。"""
@@ -120,9 +129,12 @@ def delete_monthly_rows(
     )
     deleted = int(result.rowcount or 0)
 
+    # source_type は CHECK 制約のある既存許可値を流用（スキーマ変更回避）。
+    # 削除であることは file_name と error_log.action='delete' で識別する。
+    seg_label = f"・{segment}" if use_segment else ""
     log = IngestionLog(
-        source_type=f"delete_{kind}",
-        file_name=None,
+        source_type=_LOG_SOURCE_TYPE[kind],
+        file_name=f"[削除] {year_month}{seg_label}",
         records_processed=deleted,
         records_failed=0,
         status="success",

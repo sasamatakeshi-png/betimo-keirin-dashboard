@@ -137,6 +137,8 @@ function logToDeleteTarget(
   log: IngestionLog,
 ): { kind: DeletableKind; yearMonth: string; segment: MonthlySegment | null } | null {
   const e = (log.error_log ?? {}) as Record<string, unknown>;
+  // 削除の監査ログ（取り込みと同じ *_csv source_type で記録）には取り消しを出さない。
+  if (e.action === "delete") return null;
   const ym = typeof e.year_month === "string" ? e.year_month : null;
   const seg =
     e.segment === "all" || e.segment === "live" || e.segment === "short"
