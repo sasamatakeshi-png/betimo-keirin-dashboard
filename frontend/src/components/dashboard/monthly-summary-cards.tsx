@@ -85,6 +85,19 @@ function changeRatio(
   return (latest - prev) / prev;
 }
 
+// ラベル横に出す小さな「ⓘ」注記（hover でネイティブ tooltip）。WebCM の含有可否を伝える。
+function InfoTip({ text }: { text: string }) {
+  return (
+    <span
+      title={text}
+      aria-label={text}
+      className="inline-flex h-3.5 w-3.5 cursor-help items-center justify-center rounded-full border border-muted-foreground/40 text-[9px] leading-none text-muted-foreground/70"
+    >
+      i
+    </span>
+  );
+}
+
 function SummaryCard({
   label,
   cumulative,
@@ -94,6 +107,7 @@ function SummaryCard({
   unit,
   monthLabel,
   compareLabel: cmpLabel,
+  note,
   children,
 }: {
   label: string;
@@ -105,13 +119,18 @@ function SummaryCard({
   unit?: string;
   monthLabel: string;
   compareLabel?: string | null;
+  // ラベル横の「ⓘ」tooltip 文言（WebCM 含有の事実注記）。未指定なら出さない。
+  note?: string;
   children?: React.ReactNode;
 }) {
   const badge = formatChangeBadge(changeRatio(latest, prev));
   return (
     <Card className="border-l-4 border-l-blue-500">
       <CardContent className="px-5 py-4">
-        <div className="text-sm text-muted-foreground">{label}</div>
+        <div className="flex items-center gap-1 text-sm text-muted-foreground">
+          <span>{label}</span>
+          {note && <InfoTip text={note} />}
+        </div>
         {/* 累計（または API 現在値） */}
         <div className="mt-1 text-3xl font-bold tabular-nums tracking-tight">
           {formatNumber(cumulative)}
@@ -202,6 +221,7 @@ export function MonthlySummaryCards({
     <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
       <SummaryCard
         label="インプレッション"
+        note="WebCM（広告）はインプレッションをほぼ生まないため、ほぼ通常コンテンツの数値です（WebCM<0.1%）。"
         cumulative={sumCol(metrics, "impressions")}
         latest={latest?.impressions ?? null}
         prev={prev?.impressions ?? null}
@@ -210,6 +230,11 @@ export function MonthlySummaryCards({
       />
       <SummaryCard
         label={excludeWebcm ? "再生数（WebCM除く）" : "再生数"}
+        note={
+          excludeWebcm
+            ? "「WebCM除く/込む」トグルに連動。現在はWebCM（広告）分を差し引いた数値です。"
+            : "「WebCM除く/込む」トグルに連動。現在はWebCM（広告）分を含む数値です。"
+        }
         cumulative={csvViewsCumulative}
         cumulativeLabel={`全期間（取り込み済み）${excludeWebcm ? "・WebCM除く" : ""}`}
         latest={latest?.view_count ?? null}
@@ -219,6 +244,7 @@ export function MonthlySummaryCards({
       />
       <SummaryCard
         label="総登録者数"
+        note="YouTube API累計値。WebCM（広告）経由の登録は分離できません。"
         cumulative={apiSubs ?? sumCol(metrics, "subscribers")}
         cumulativeLabel={apiNote(apiSubs)}
         latest={latest?.subscribers ?? null}
@@ -228,6 +254,11 @@ export function MonthlySummaryCards({
       />
       <SummaryCard
         label={excludeWebcm ? "総再生時間（WebCM除く）" : "総再生時間"}
+        note={
+          excludeWebcm
+            ? "「WebCM除く/込む」トグルに連動。現在はWebCM（広告）分を差し引いた数値です。"
+            : "「WebCM除く/込む」トグルに連動。現在はWebCM（広告）分を含む数値です。"
+        }
         cumulative={sumCol(metrics, "total_watch_time_hours")}
         cumulativeLabel={excludeWebcm ? "累計（全期間・WebCM除く）" : "累計（全期間）"}
         latest={latest?.total_watch_time_hours ?? null}
@@ -238,6 +269,7 @@ export function MonthlySummaryCards({
       />
       <SummaryCard
         label="本数"
+        note="番組・動画の本数（WebCMは含みません）。"
         cumulative={cntCumulative}
         latest={cntLatest?.total ?? null}
         prev={cntPrev?.total ?? null}

@@ -15,6 +15,24 @@ function pct(v: number | null): string {
   return v == null ? "—" : `${v.toFixed(1)}%`;
 }
 
+// 視聴者数系（UU・新規）の WebCM 注記。トグルでは変わらない旨を伝える。
+const VIEWER_NOTE =
+  "WebCM（広告）経由の視聴者を含みます。視聴者数はチャンネル全体で重複排除されているため、" +
+  "WebCM分のみの差し引きはできません（「WebCM除く」でも変わりません。特に2026年5月はWebCMが大半）。";
+
+// ヘッダ横の小さな「ⓘ」（hover でネイティブ tooltip）。
+function HeadTip({ text }: { text: string }) {
+  return (
+    <span
+      title={text}
+      aria-label={text}
+      className="ml-0.5 inline-flex h-3 w-3 cursor-help items-center justify-center rounded-full border border-muted-foreground/40 align-middle text-[8px] leading-none text-muted-foreground/70"
+    >
+      i
+    </span>
+  );
+}
+
 export function MonthlyTable({
   items,
   webcmAdjusted = false,
@@ -40,8 +58,12 @@ export function MonthlyTable({
             <th className="px-2 py-2 font-medium">月</th>
             <th className="px-2 py-2 text-right font-medium">再生数{cmSuffix}</th>
             <th className="px-2 py-2 text-right font-medium">インプレッション</th>
-            <th className="px-2 py-2 text-right font-medium">UU</th>
-            <th className="px-2 py-2 text-right font-medium">新規</th>
+            <th className="px-2 py-2 text-right font-medium">
+              UU<HeadTip text={VIEWER_NOTE} />
+            </th>
+            <th className="px-2 py-2 text-right font-medium">
+              新規<HeadTip text={VIEWER_NOTE} />
+            </th>
             <th className="px-2 py-2 text-right font-medium">リピーター</th>
             <th className="px-2 py-2 text-right font-medium">総再生時間(h){cmSuffix}</th>
             <th className="px-2 py-2 text-right font-medium">登録増</th>
@@ -66,6 +88,10 @@ export function MonthlyTable({
           ))}
         </tbody>
       </table>
+      <p className="mt-2 text-[11px] leading-relaxed text-muted-foreground">
+        {webcmAdjusted && "再生数・総再生時間(h) は WebCM（広告）分を除いた値です。"}
+        UU・新規は{VIEWER_NOTE}
+      </p>
     </div>
   );
 }

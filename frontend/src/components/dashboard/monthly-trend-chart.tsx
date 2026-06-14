@@ -70,6 +70,8 @@ export function MonthlyTrendChart({
   const metricLabel = METRICS.find((m) => m.key === metric)?.label ?? "";
   // 選択中の指標が WebCM 差し引き対象（再生数/総再生時間）か。
   const metricAdjusted = webcmAdjusted && isWebcmAdjustedKey(metric);
+  // 新規視聴者は WebCM の影響大だが重複排除のため差し引けない（「除く」でも変わらない）。
+  const metricViewerWebcm = webcmAdjusted && metric === "new_viewers";
 
   const data = items.map((it) => ({
     ym: ymShort(it.year_month),
@@ -100,6 +102,11 @@ export function MonthlyTrendChart({
         {metricAdjusted && (
           <span className="ml-1 text-[11px] text-amber-600">
             ※WebCM（広告）分を各月から除外して表示
+          </span>
+        )}
+        {metricViewerWebcm && (
+          <span className="ml-1 text-[11px] text-amber-600">
+            ※WebCM（広告）経由の視聴者を含みます（重複排除のため差し引き不可）
           </span>
         )}
       </div>
