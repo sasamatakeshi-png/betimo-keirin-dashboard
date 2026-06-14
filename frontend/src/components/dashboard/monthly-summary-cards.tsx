@@ -6,9 +6,12 @@
 // 比率系は累計に出さない（合算不可のため）。
 //
 // 例外（YouTube API ハイブリッド）:
-//   - 「総登録者数」「再生数」の累計欄は、API で取得した現在の累計値を優先表示する
+//   - 「総登録者数」の累計欄のみ、API で取得した現在の累計値を優先表示する
 //     （channelStats）。API値が無い（キー未設定/取得失敗）ときは従来のCSV合算へ
 //     フォールバックして表示が壊れないようにする。
+//   - 「再生数」の累計欄は CSV（monthly_channel_metrics all）合算ベースに統一する。
+//     API 生涯値は WebCM 広告再生を含まず Studio の全期間視聴回数と乖離するため表示に使わない
+//     （API の取得・保存は継続。WebCM除く時は WebCM 差引済みの metrics 合算になる）。
 //   - 「総再生時間」「インプレッション」「本数」は API に無いため CSV 合算のまま。
 
 import { Card, CardContent } from "@/components/ui/card";
@@ -149,7 +152,6 @@ export function MonthlySummaryCards({
   channelStats = null,
   selectedMonth = null,
   excludeWebcm = false,
-  webcmViewTotal = 0,
 }: {
   metrics: MonthlyMetricPoint[];
   counts: MonthlyVideoCountPoint[];
@@ -157,12 +159,10 @@ export function MonthlySummaryCards({
   channelStats?: ChannelStatsResponse | null;
   // 単月部分の対象月（'YYYY-MM'）。null/未指定なら最新月。累計部分には影響しない。
   selectedMonth?: string | null;
-  // 「WebCM除く」適用中か。再生数・総再生時間のカードに注記を出す。
+  // 「WebCM除く」適用中か。再生数・総再生時間のカードに注記を出し、
+  // 再生数累計は API 生涯値ではなく CSV 月次（WebCM差引済み metrics）の合算を使う。
   // metrics は呼び出し側で既に WebCM 差し引き済みを渡す前提（単月・CSV累計に反映済み）。
   excludeWebcm?: boolean;
-  // YouTube API 生涯累計（再生数）から差し引く全期間 WebCM 再生数。
-  // metrics の差し引きとは別に、API 累計値にのみ適用する。
-  webcmViewTotal?: number;
 }) {
   const { current: latest, prev } = pickMonth(metrics, selectedMonth);
   const monthLabel = ymLabel(latest?.year_month);
@@ -178,13 +178,16 @@ export function MonthlySummaryCards({
     }
   }
 
-  // 「再生数」「総登録者数」の累計欄: API値を優先し、無ければ CSV 合算へフォールバック。
-  // 「WebCM除く」時は API 生涯累計（再生数）からも全期間 WebCM 分を差し引く。
-  const apiViewsRaw = channelStats?.view_count ?? null;
-  const apiViews =
-    apiViewsRaw != null && excludeWebcm
-      ? Math.max(0, apiViewsRaw - webcmViewTotal)
-      : apiViewsRaw;
+  // 「再生数」累計は CSV（monthly_channel_metrics segment=all）合算ベースに統一する。
+  //   Studio の全期間視聴回数と一致させ、Studio を見た人の違和感を避けるため。
+  //   - 込む累計 = 全月 view_count 合算（≈27,603,033、Studio 全期間と一致）
+  //   - 除く累計 = 全月 (view_count − その月の WebCM) 合算（≈4,649,960）
+  //   metrics は呼び出し側で WebCM 差引済み（除く時）／生値（込む時）が渡るため、
+  //   sumCol(metrics, "view_count") をそのまま使えば込む/除く両方が CSV 同一範囲になる。
+  //   YouTube API 生涯 view_count は WebCM 広告再生を含まず Studio と乖離するため表示には使わない
+  //   （channelStats の取得・保存は継続。登録者カードでは引き続き API 値を使う）。
+  const csvViewsCumulative = sumCol(metrics, "view_count");
+  // 「総登録者数」累計: 従来どおり YouTube API 値を優先し、無ければ CSV 合算へフォールバック。
   const apiSubs = channelStats?.subscriber_count ?? null;
   const snapDate = channelStats?.snapshot_date ?? null;
   // API由来のときは出所と取得日を注記、無ければ従来の累計（CSV）扱いと分かる注記。
@@ -207,8 +210,8 @@ export function MonthlySummaryCards({
       />
       <SummaryCard
         label={excludeWebcm ? "再生数（WebCM除く）" : "再生数"}
-        cumulative={apiViews ?? sumCol(metrics, "view_count")}
-        cumulativeLabel={`${apiNote(apiViews)}${excludeWebcm ? "・WebCM除く" : ""}`}
+        cumulative={csvViewsCumulative}
+        cumulativeLabel={`全期間（取り込み済み）${excludeWebcm ? "・WebCM除く" : ""}`}
         latest={latest?.view_count ?? null}
         prev={prev?.view_count ?? null}
         monthLabel={monthLabel}

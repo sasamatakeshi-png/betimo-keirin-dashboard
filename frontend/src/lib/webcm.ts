@@ -64,15 +64,3 @@ export function adjustMetricsForWebcm(
     };
   });
 }
-
-// 全期間（取得済み全月）の WebCM 合計（累計カードの差し引き用）。
-export function totalWebcm(
-  webcm: WebcmMonthlyResponse | null,
-  key: WebcmAdjustedKey,
-): number {
-  if (!webcm) return 0;
-  return webcm.items.reduce((a, p) => {
-    if (key === "view_count") return a + (p.webcm_view_count ?? 0);
-    return a + (p.ad_total_watch_time_hours ?? 0);
-  }, 0);
-}

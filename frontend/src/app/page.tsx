@@ -24,11 +24,7 @@ import {
   getWebcmMonthly,
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
-import {
-  adjustMetricsForWebcm,
-  totalWebcm,
-  type WebcmMode,
-} from "@/lib/webcm";
+import { adjustMetricsForWebcm, type WebcmMode } from "@/lib/webcm";
 import type {
   ChannelStatsResponse,
   HomeResponse,
@@ -210,8 +206,6 @@ function DashboardContent({ data }: { data: HomeData }) {
     webcmMode,
     true,
   );
-  // 累計（YouTube API 生涯値）から差し引く全期間 WebCM 再生数（「除く」時のみ）。
-  const webcmViewTotal = excludeWebcm ? totalWebcm(data.webcm, "view_count") : 0;
   const currentDemo = selectedMonth ? demoByMonth[selectedMonth] : undefined;
 
   return (
@@ -244,7 +238,6 @@ function DashboardContent({ data }: { data: HomeData }) {
         channelStats={data.channelStats}
         selectedMonth={selectedMonth}
         excludeWebcm={webcmActive}
-        webcmViewTotal={webcmViewTotal}
       />
 
       {/* 2-3. 月次推移グラフ + データ表（segment + 期間フィルタ連動。対象月とは無関係） */}
