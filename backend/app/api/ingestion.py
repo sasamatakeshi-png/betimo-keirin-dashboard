@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -13,6 +13,8 @@ from app.core.security import get_current_auth
 from app.models import IngestionLog
 from app.schemas.common import Page, Pagination, pagination
 from app.schemas.ingestion import (
+    DeletePreviewResult,
+    DeleteResult,
     IngestionLogOut,
     MonthlyUploadResult,
     MonthlyVideoUploadResult,
@@ -23,6 +25,12 @@ from app.services.ingestion import (
     SHORT_INGEST_TYPES,
     ingest_csv,
     ingest_short_csv,
+)
+from app.services.monthly_deletion import (
+    DELETABLE_KINDS,
+    MonthlyDeleteError,
+    count_monthly_rows,
+    delete_monthly_rows,
 )
 from app.services.monthly_ingestion import (
     MONTHLY_KINDS,
@@ -149,6 +157,59 @@ async def upload_monthly_video_csv(
             status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
         ) from exc
     return MonthlyVideoUploadResult(**result)
+
+
+# ---------------------------------------------------------------------------
+# 削除（取り込みミスの修正）。月次系3テーブルのみ。範囲を厳密に限定する。
+#   - プレビュー(GET): 件数のみ返す（実際には削除しない）
+#   - 削除(DELETE): 認証必須。指定した月[+segment]のみを削除し監査ログを残す
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/delete-preview",
+    response_model=DeletePreviewResult,
+    dependencies=[Depends(get_current_auth)],
+)
+def delete_preview(
+    kind: str = Query(..., description=f"削除種別 {sorted(DELETABLE_KINDS)}"),
+    year_month: str = Query(..., description="対象月 'YYYY-MM'"),
+    segment: str | None = Query(
+        None, description="all|live|short（monthly_video では不要）"
+    ),
+    db: Session = Depends(get_db),
+) -> DeletePreviewResult:
+    """削除対象の件数を返す（読み取り専用。実際には消さない）。"""
+    try:
+        result = count_monthly_rows(db, kind, year_month, segment)
+    except MonthlyDeleteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return DeletePreviewResult(**result)
+
+
+@router.delete(
+    "/monthly",
+    response_model=DeleteResult,
+    dependencies=[Depends(get_current_auth)],
+)
+def delete_monthly(
+    kind: str = Query(..., description=f"削除種別 {sorted(DELETABLE_KINDS)}"),
+    year_month: str = Query(..., description="対象月 'YYYY-MM'"),
+    segment: str | None = Query(
+        None, description="all|live|short（monthly_video では不要）"
+    ),
+    db: Session = Depends(get_db),
+) -> DeleteResult:
+    """指定した月[+segment]のデータのみを削除する（認証必須・監査ログ記録）。"""
+    try:
+        result = delete_monthly_rows(db, kind, year_month, segment)
+    except MonthlyDeleteError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return DeleteResult(**result)
 
 
 @router.get(

@@ -6,9 +6,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { LoginDialog } from "@/components/auth/login-dialog";
+import { Modal } from "@/components/modal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ApiError,
+  deleteMonthlyData,
+  getDeletePreview,
   getIngestionLogs,
   uploadIngestionCsv,
   uploadMonthlyCsv,
@@ -17,7 +20,17 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatDateTime, formatNumber } from "@/lib/format";
+import {
+  NAMING_RULES,
+  guessMonthly,
+  guessNormalType,
+  guessShortType,
+  guessYearMonth,
+} from "@/lib/ingest-guess";
 import type {
+  DeletableKind,
+  DeletePreviewResult,
+  DeleteResult,
   IngestionLog,
   IngestType,
   MonthlyKind,
@@ -105,50 +118,41 @@ interface MonthlyRow {
   yearMonth: string;
   kind: MonthlyKind;
   segment: MonthlySegment;
+  // ファイル名から推測できた項目（手動変更の不一致強調に使う。①の警告と連動）
+  inferred: { yearMonth: boolean; kind: boolean; segment: boolean };
   status: MonthlyRowStatus;
   message: string | null;
 }
 
-// ファイル名から 月/種別/セグメント の初期値を推測する（外れても手で変更可）。
-// 規則:
-//  - 種別: 「性別」「年齢」「demographic」「gender」「age」を含めば demographics、他は metrics。
-//  - セグメント: 「ショート/short」→short、「ライブ/live/配信」→live、「全体/all/チャンネル」→all、既定 all。
-//  - 対象月: 「YYYY-MM / YYYY_MM / YYYYMM」または「YYYY年M月」を優先。年の無い「M月」は
-//    その月を持つ最新の選択肢を採用。いずれも候補に無ければ既定(最新月)。
-function guessMonthlyFromName(
-  name: string,
-  monthOptions: { value: string }[],
-  defaultYearMonth: string,
-): { yearMonth: string; kind: MonthlyKind; segment: MonthlySegment } {
-  let kind: MonthlyKind = "metrics";
-  if (/性別|年齢|demograph|gender|age/i.test(name)) kind = "demographics";
+// 削除UI（取り込みの修正）。種別の表示ラベルとテーブル名。
+const DELETABLE_KIND_OPTIONS: { value: DeletableKind; label: string; table: string; hasSegment: boolean }[] = [
+  { value: "monthly_metrics", label: "月次・数値", table: "monthly_channel_metrics", hasSegment: true },
+  { value: "monthly_demographics", label: "月次・性別年齢", table: "monthly_demographics", hasSegment: true },
+  { value: "monthly_video", label: "月次・動画別", table: "monthly_video_metrics", hasSegment: false },
+];
 
-  let segment: MonthlySegment = "all";
-  if (/ショート|short/i.test(name)) segment = "short";
-  else if (/ライブ|live|配信/i.test(name)) segment = "live";
-  else if (/全体|all|チャンネル/i.test(name)) segment = "all";
-
-  let yearMonth = defaultYearMonth;
-  const valid = new Set(monthOptions.map((o) => o.value));
-  const ym = /(20\d{2})[-_.]?(0[1-9]|1[0-2])/.exec(name);
-  if (ym && valid.has(`${ym[1]}-${ym[2]}`)) {
-    yearMonth = `${ym[1]}-${ym[2]}`;
-  } else {
-    const mm = /(\d{1,2})\s*月/.exec(name);
-    const month = mm ? Number(mm[1]) : 0;
-    if (month >= 1 && month <= 12) {
-      const mp = String(month).padStart(2, "0");
-      const yyyy = /(20\d{2})\s*年/.exec(name);
-      if (yyyy && valid.has(`${yyyy[1]}-${mp}`)) {
-        yearMonth = `${yyyy[1]}-${mp}`;
-      } else {
-        // 年指定なし → その月を持つ最新の選択肢（monthOptions は新しい順）
-        const found = monthOptions.find((o) => o.value.endsWith(`-${mp}`));
-        if (found) yearMonth = found.value;
-      }
-    }
+// 取り込みログ(source_type)から「取り消し」削除対象を導出する。
+// 月次系のみ正確に紐付け可能。それ以外（通常/ショートCSV、削除ログ）は null＝取り消し非対応。
+function logToDeleteTarget(
+  log: IngestionLog,
+): { kind: DeletableKind; yearMonth: string; segment: MonthlySegment | null } | null {
+  const e = (log.error_log ?? {}) as Record<string, unknown>;
+  const ym = typeof e.year_month === "string" ? e.year_month : null;
+  const seg =
+    e.segment === "all" || e.segment === "live" || e.segment === "short"
+      ? (e.segment as MonthlySegment)
+      : null;
+  if (!ym) return null;
+  switch (log.source_type) {
+    case "monthly_metrics_csv":
+      return seg ? { kind: "monthly_metrics", yearMonth: ym, segment: seg } : null;
+    case "monthly_demographics_csv":
+      return seg ? { kind: "monthly_demographics", yearMonth: ym, segment: seg } : null;
+    case "monthly_video_csv":
+      return { kind: "monthly_video", yearMonth: ym, segment: null };
+    default:
+      return null; // zenkikan/90d/short/delete_* は取り消し非対応
   }
-  return { yearMonth, kind, segment };
 }
 
 export default function IngestPage() {
@@ -202,6 +206,23 @@ export default function IngestPage() {
   const [logsError, setLogsError] = useState<string | null>(null);
   const [logsLoading, setLogsLoading] = useState(true);
 
+  // ③ 削除（取り込みの修正）。(b)月指定フォームの選択状態。
+  const [delKind, setDelKind] = useState<DeletableKind>("monthly_video");
+  const [delYM, setDelYM] = useState<string>(monthlyDefaultYM);
+  const [delSegment, setDelSegment] = useState<MonthlySegment>("all");
+  // 二段階確認: プレビュー取得 → モーダルで確認 → 実行。
+  const [delTarget, setDelTarget] = useState<{
+    kind: DeletableKind;
+    yearMonth: string;
+    segment: MonthlySegment | null;
+  } | null>(null);
+  const [delPreview, setDelPreview] = useState<DeletePreviewResult | null>(null);
+  const [delModalOpen, setDelModalOpen] = useState(false);
+  const [delBusy, setDelBusy] = useState(false); // プレビュー取得 or 削除実行中
+  const [delConfirmChecked, setDelConfirmChecked] = useState(false);
+  const [delError, setDelError] = useState<string | null>(null);
+  const [delResult, setDelResult] = useState<DeleteResult | null>(null);
+
   // setState は Promise コールバック内のみ（effect 本体での同期 setState を避ける）
   const loadLogs = useCallback(
     () =>
@@ -228,6 +249,18 @@ export default function IngestPage() {
 
   async function handleUpload() {
     if (!file || !canEdit || uploading) return;
+    // ① 不一致警告: ファイル名から種別を推測でき、選択中と食い違うなら確認。
+    const guessed = guessNormalType(file.name);
+    if (guessed && guessed !== type) {
+      const gl = TYPE_OPTIONS.find((o) => o.value === guessed)?.label ?? guessed;
+      const cl = TYPE_OPTIONS.find((o) => o.value === type)?.label ?? type;
+      if (
+        !window.confirm(
+          `ファイル名は「${gl}」のようですが、種別は「${cl}」が選ばれています。続行しますか？`,
+        )
+      )
+        return;
+    }
     setUploading(true);
     setUploadError(null);
     setResult(null);
@@ -250,11 +283,26 @@ export default function IngestPage() {
       setFile(f);
       setResult(null);
       setUploadError(null);
+      // ② 自動判別: ファイル名から種別が分かれば選択を合わせる。
+      const guessed = guessNormalType(f.name);
+      if (guessed) setType(guessed);
     }
   }
 
   async function handleUploadShort() {
     if (!shortFile || !canEdit || shortUploading) return;
+    // ① 不一致警告
+    const guessed = guessShortType(shortFile.name);
+    if (guessed && guessed !== shortType) {
+      const gl = SHORT_TYPE_OPTIONS.find((o) => o.value === guessed)?.label ?? guessed;
+      const cl = SHORT_TYPE_OPTIONS.find((o) => o.value === shortType)?.label ?? shortType;
+      if (
+        !window.confirm(
+          `ファイル名は「${gl}」のようですが、種別は「${cl}」が選ばれています。続行しますか？`,
+        )
+      )
+        return;
+    }
     setShortUploading(true);
     setShortError(null);
     setShortResult(null);
@@ -277,11 +325,26 @@ export default function IngestPage() {
       setShortFile(f);
       setShortResult(null);
       setShortError(null);
+      // ② 自動判別
+      const guessed = guessShortType(f.name);
+      if (guessed) setShortType(guessed);
     }
   }
 
   async function handleUploadMonthlyVideo() {
     if (!videoFile || !videoYearMonth || !canEdit || videoUploading) return;
+    // ① 不一致警告: ファイル名の月が選択中の対象月と食い違うなら確認。
+    const guessedYM = guessYearMonth(videoFile.name, monthOptions.map((o) => o.value));
+    if (guessedYM && guessedYM !== videoYearMonth) {
+      if (
+        !window.confirm(
+          `ファイル名は「${formatYearMonthLabel(guessedYM)}」ですが、対象月は「${formatYearMonthLabel(
+            videoYearMonth,
+          )}」が選ばれています。続行しますか？`,
+        )
+      )
+        return;
+    }
     setVideoUploading(true);
     setVideoError(null);
     setVideoResult(null);
@@ -304,6 +367,9 @@ export default function IngestPage() {
       setVideoFile(f);
       setVideoResult(null);
       setVideoError(null);
+      // ② 自動判別: ファイル名の月を対象月にセット。
+      const guessedYM = guessYearMonth(f.name, monthOptions.map((o) => o.value));
+      if (guessedYM) setVideoYearMonth(guessedYM);
     }
   }
 
@@ -317,11 +383,12 @@ export default function IngestPage() {
     );
     if (arr.length === 0) return;
     setMonthlySummary(null);
+    const monthValues = monthOptions.map((o) => o.value);
     setMonthlyRows((rows) => {
       const next = [...rows];
       for (const f of arr) {
         monthlyRowIdRef.current += 1;
-        const g = guessMonthlyFromName(f.name, monthOptions, monthlyDefaultYM);
+        const g = guessMonthly(f.name, monthValues, monthlyDefaultYM);
         next.push({
           id: `mr${monthlyRowIdRef.current}`,
           fileName: f.name,
@@ -329,6 +396,7 @@ export default function IngestPage() {
           yearMonth: g.yearMonth,
           kind: g.kind,
           segment: g.segment,
+          inferred: g.inferred,
           status: "idle",
           message: null,
         });
@@ -351,11 +419,47 @@ export default function IngestPage() {
     setMonthlyProgress(null);
   }
 
+  // ① 行ごとの不一致判定: ファイル名から推測できた項目が、現在の設定と食い違うか。
+  const monthValues = monthOptions.map((o) => o.value);
+  function rowFieldMismatch(row: MonthlyRow): {
+    yearMonth: boolean;
+    kind: boolean;
+    segment: boolean;
+  } {
+    const g = guessMonthly(row.fileName, monthValues, monthlyDefaultYM);
+    return {
+      yearMonth: g.inferred.yearMonth && g.yearMonth !== row.yearMonth,
+      kind: g.inferred.kind && g.kind !== row.kind,
+      segment: g.inferred.segment && g.segment !== row.segment,
+    };
+  }
+  function isRowMismatched(row: MonthlyRow): boolean {
+    const m = rowFieldMismatch(row);
+    return m.yearMonth || m.kind || m.segment;
+  }
+
   async function handleUploadMonthlyBatch() {
     if (!canEdit || monthlyBatchRunning) return;
     // 未成功(idle/error)の行のみ処理 → 失敗後の再実行で成功分を二重投入しない
     const targets = monthlyRows.filter((r) => r.status !== "success");
     if (targets.length === 0) return;
+
+    // ① 不一致警告: 自動判別と異なる手動変更がある行をまとめて確認する。
+    const mismatched = targets.filter((r) => isRowMismatched(r));
+    if (mismatched.length > 0) {
+      const lines = mismatched
+        .map(
+          (r) =>
+            `・${r.fileName} → ${formatYearMonthLabel(r.yearMonth)}・${MONTHLY_KIND_LABEL[r.kind]}・${MONTHLY_SEGMENT_LABEL[r.segment]}`,
+        )
+        .join("\n");
+      if (
+        !window.confirm(
+          `次の ${mismatched.length} 件はファイル名からの自動判別と設定が食い違っています。この設定で取り込みますか？\n\n${lines}`,
+        )
+      )
+        return;
+    }
 
     setMonthlyBatchRunning(true);
     setMonthlySummary(null);
@@ -396,6 +500,56 @@ export default function IngestPage() {
     setMonthlyBatchRunning(false);
     setLogsLoading(true);
     void loadLogs();
+  }
+
+  // ③ 削除フロー: 第1段階＝プレビュー件数を取得してモーダルを開く（まだ消さない）。
+  async function openDeleteFlow(target: {
+    kind: DeletableKind;
+    yearMonth: string;
+    segment: MonthlySegment | null;
+  }) {
+    if (!canEdit || delBusy) return;
+    setDelTarget(target);
+    setDelPreview(null);
+    setDelResult(null);
+    setDelError(null);
+    setDelConfirmChecked(false);
+    setDelModalOpen(true);
+    setDelBusy(true);
+    try {
+      const p = await getDeletePreview(target.kind, target.yearMonth, target.segment);
+      setDelPreview(p);
+    } catch (e) {
+      setDelError(e instanceof Error ? e.message : "プレビューの取得に失敗しました");
+    } finally {
+      setDelBusy(false);
+    }
+  }
+
+  // ③ 削除フロー: 第2段階＝確認後に実際の削除を実行する。
+  async function confirmDelete() {
+    if (!delTarget || !delConfirmChecked || delBusy) return;
+    setDelBusy(true);
+    setDelError(null);
+    try {
+      const r = await deleteMonthlyData(delTarget.kind, delTarget.yearMonth, delTarget.segment);
+      setDelResult(r);
+      setLogsLoading(true);
+      void loadLogs();
+    } catch (e) {
+      setDelError(e instanceof Error ? e.message : "削除に失敗しました");
+    } finally {
+      setDelBusy(false);
+    }
+  }
+
+  function closeDeleteModal() {
+    if (delBusy) return;
+    setDelModalOpen(false);
+    setDelTarget(null);
+    setDelPreview(null);
+    setDelConfirmChecked(false);
+    setDelError(null);
   }
 
   return (
@@ -485,6 +639,7 @@ export default function IngestPage() {
               </>
             )}
           </label>
+          <p className="text-[11px] text-muted-foreground">{NAMING_RULES.normal}</p>
 
           {/* 実行 */}
           <div className="flex items-center gap-3">
@@ -608,6 +763,7 @@ export default function IngestPage() {
               </>
             )}
           </label>
+          <p className="text-[11px] text-muted-foreground">{NAMING_RULES.short}</p>
 
           {/* 実行 */}
           <div className="flex items-center gap-3">
@@ -695,12 +851,21 @@ export default function IngestPage() {
             <span>月次CSVをドロップ、またはクリックして選択（複数可）</span>
             <span className="text-xs text-muted-foreground">.csv（UTF-8 / Shift_JIS 両対応）</span>
           </label>
+          <p className="text-[11px] text-muted-foreground">{NAMING_RULES.monthly}</p>
 
           {/* ファイルごとの設定リスト */}
           {monthlyRows.length > 0 && (
             <div className="space-y-2">
-              {monthlyRows.map((row) => (
-                <div key={row.id} className="space-y-2 rounded-lg border p-3 text-sm">
+              {monthlyRows.map((row) => {
+                const mm = rowFieldMismatch(row);
+                const anyMismatch = mm.yearMonth || mm.kind || mm.segment;
+                const selBase = "rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50";
+                const selWarn = "border-amber-400 bg-amber-50 text-amber-800";
+                return (
+                <div
+                  key={row.id}
+                  className={`space-y-2 rounded-lg border p-3 text-sm ${anyMismatch ? "border-amber-300 bg-amber-50/30" : ""}`}
+                >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate font-medium" title={row.fileName}>
                       {row.fileName}
@@ -733,7 +898,7 @@ export default function IngestPage() {
                       value={row.yearMonth}
                       onChange={(e) => updateMonthlyRow(row.id, { yearMonth: e.target.value })}
                       disabled={monthlyBatchRunning}
-                      className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+                      className={`${selBase} ${mm.yearMonth ? selWarn : ""}`}
                     >
                       {monthOptions.length === 0 && <option value="">—</option>}
                       {monthOptions.map((opt) => (
@@ -751,7 +916,7 @@ export default function IngestPage() {
                         updateMonthlyRow(row.id, { kind: e.target.value as MonthlyKind })
                       }
                       disabled={monthlyBatchRunning}
-                      className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+                      className={`${selBase} ${mm.kind ? selWarn : ""}`}
                     >
                       {MONTHLY_KIND_OPTIONS.map((opt) => (
                         <option key={opt.value} value={opt.value}>
@@ -768,7 +933,7 @@ export default function IngestPage() {
                         updateMonthlyRow(row.id, { segment: e.target.value as MonthlySegment })
                       }
                       disabled={monthlyBatchRunning}
-                      className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+                      className={`${selBase} ${mm.segment ? selWarn : ""}`}
                     >
                       {MONTHLY_SEGMENT_OPTIONS.map((opt) => (
                         <option key={opt.value} value={opt.value}>
@@ -777,6 +942,12 @@ export default function IngestPage() {
                       ))}
                     </select>
                   </div>
+
+                  {anyMismatch && (
+                    <div className="text-[11px] text-amber-700">
+                      ⚠ ファイル名からの自動判別と設定が異なります（黄色の項目）。問題なければそのまま取り込めます。
+                    </div>
+                  )}
 
                   {row.message && (
                     <div
@@ -788,7 +959,8 @@ export default function IngestPage() {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
 
@@ -922,6 +1094,7 @@ export default function IngestPage() {
               </>
             )}
           </label>
+          <p className="text-[11px] text-muted-foreground">{NAMING_RULES.video}</p>
 
           {/* 実行 */}
           <div className="flex items-center gap-3">
@@ -962,6 +1135,101 @@ export default function IngestPage() {
         </CardContent>
       </Card>
 
+      {/* 取り込みの修正・削除（月・種別を指定して物理削除。二段階確認＋プレビュー） */}
+      <Card className="border-red-200">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">取り込みの修正・削除</CardTitle>
+          {authRequired === true && !canEdit && (
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            取り込みミスの修正用。月次データ（数値／性別年齢／動画別）を「対象月＋種別（＋セグメント）」で削除します。
+            削除前に件数をプレビューし、確認のうえ実行します。<span className="text-red-600">この操作は元に戻せません。</span>
+            指定した範囲のみ削除し、他の月・他テーブルには影響しません。通常CSV／ショートCSVは取り込み単位を特定できないため対象外です。
+          </p>
+
+          <div className="flex flex-wrap items-end gap-2">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              種別
+              <select
+                value={delKind}
+                onChange={(e) => setDelKind(e.target.value as DeletableKind)}
+                disabled={!canEdit}
+                className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+              >
+                {DELETABLE_KIND_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              対象月
+              <select
+                value={delYM}
+                onChange={(e) => setDelYM(e.target.value)}
+                disabled={!canEdit}
+                className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+              >
+                {monthOptions.length === 0 && <option value="">—</option>}
+                {monthOptions.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {DELETABLE_KIND_OPTIONS.find((o) => o.value === delKind)?.hasSegment && (
+              <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+                セグメント
+                <select
+                  value={delSegment}
+                  onChange={(e) => setDelSegment(e.target.value as MonthlySegment)}
+                  disabled={!canEdit}
+                  className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+                >
+                  {MONTHLY_SEGMENT_OPTIONS.map((opt) => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
+            <button
+              type="button"
+              onClick={() => {
+                const hasSeg = DELETABLE_KIND_OPTIONS.find((o) => o.value === delKind)?.hasSegment;
+                void openDeleteFlow({
+                  kind: delKind,
+                  yearMonth: delYM,
+                  segment: hasSeg ? delSegment : null,
+                });
+              }}
+              disabled={!canEdit || !delYM || delBusy}
+              className="rounded-md border border-red-300 bg-red-50 px-4 py-1.5 text-sm text-red-700 hover:bg-red-100 disabled:opacity-50"
+            >
+              削除プレビュー
+            </button>
+            {!canEdit && probed && (
+              <span className="text-xs text-muted-foreground">削除にはログインが必要です</span>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* 取り込み履歴 */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
@@ -996,11 +1264,13 @@ export default function IngestPage() {
                     <th className="px-2 py-2 text-right font-medium">処理件数</th>
                     <th className="px-2 py-2 text-right font-medium">失敗</th>
                     <th className="px-2 py-2 font-medium">状態</th>
+                    <th className="px-2 py-2 font-medium">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {logs.map((l) => {
                     const at = l.completed_at ?? l.started_at;
+                    const undoTarget = logToDeleteTarget(l);
                     return (
                       <tr key={l.id} className="border-b last:border-0">
                         <td className="px-2 py-2 whitespace-nowrap tabular-nums">
@@ -1021,6 +1291,25 @@ export default function IngestPage() {
                             {l.status}
                           </span>
                         </td>
+                        <td className="px-2 py-2 whitespace-nowrap">
+                          {undoTarget ? (
+                            <button
+                              type="button"
+                              onClick={() => void openDeleteFlow(undoTarget)}
+                              disabled={!canEdit || delBusy}
+                              className="rounded border border-red-300 px-2 py-0.5 text-xs text-red-700 hover:bg-red-50 disabled:opacity-50"
+                            >
+                              取り消し
+                            </button>
+                          ) : (
+                            <span
+                              className="text-[11px] text-muted-foreground/60"
+                              title="この種別は取り消し非対応です。月次データは上の「取り込みの修正・削除」から月・種別を指定して削除してください。"
+                            >
+                              —
+                            </span>
+                          )}
+                        </td>
                       </tr>
                     );
                   })}
@@ -1030,6 +1319,91 @@ export default function IngestPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* ③ 削除の二段階確認モーダル（プレビュー → 確認 → 実行） */}
+      <Modal open={delModalOpen} onClose={closeDeleteModal} title="データ削除の確認">
+        {delResult ? (
+          <div className="space-y-4">
+            <div className="rounded-md border border-green-200 bg-green-50/50 p-3 text-sm text-green-800">
+              {DELETABLE_KIND_OPTIONS.find((o) => o.value === delResult.kind)?.label}（
+              {delResult.table}）の {formatYearMonthLabel(delResult.year_month)}
+              {delResult.segment ? `・${MONTHLY_SEGMENT_LABEL[delResult.segment]}` : ""} を{" "}
+              <span className="font-semibold">{formatNumber(delResult.deleted)} 件</span> 削除しました。
+            </div>
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={closeDeleteModal}
+                className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {delError && (
+              <div className="rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600">
+                {delError}
+              </div>
+            )}
+
+            {delBusy && !delPreview ? (
+              <div className="py-4 text-center text-sm text-muted-foreground">件数を確認中…</div>
+            ) : delPreview ? (
+              <>
+                <div className="rounded-md border bg-muted/30 p-3 text-sm">
+                  <span className="font-medium">
+                    {DELETABLE_KIND_OPTIONS.find((o) => o.value === delPreview.kind)?.label}
+                  </span>
+                  （{delPreview.table}）の{" "}
+                  <span className="font-medium">{formatYearMonthLabel(delPreview.year_month)}</span>
+                  {delPreview.segment ? `・${MONTHLY_SEGMENT_LABEL[delPreview.segment]}` : ""} を{" "}
+                  <span className="font-semibold text-red-700">
+                    {formatNumber(delPreview.count)} 件
+                  </span>{" "}
+                  削除します。
+                  {delPreview.count === 0 && (
+                    <div className="mt-1 text-xs text-muted-foreground">
+                      対象データがありません（削除するものはありません）。
+                    </div>
+                  )}
+                </div>
+                <p className="text-sm text-red-600">
+                  この操作は元に戻せません。指定した範囲（対象月{delPreview.segment ? "・セグメント" : ""}）のみを削除し、他の月・他テーブルには影響しません。
+                </p>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={delConfirmChecked}
+                    onChange={(e) => setDelConfirmChecked(e.target.checked)}
+                    disabled={delPreview.count === 0 || delBusy}
+                  />
+                  この操作は元に戻せないことを理解しました
+                </label>
+                <div className="flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={closeDeleteModal}
+                    disabled={delBusy}
+                    className="rounded-md border px-4 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void confirmDelete()}
+                    disabled={!delConfirmChecked || delBusy || delPreview.count === 0}
+                    className="rounded-md bg-red-600 px-4 py-1.5 text-sm text-white hover:bg-red-700 disabled:opacity-50"
+                  >
+                    {delBusy ? "削除中…" : "削除する"}
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </div>
+        )}
+      </Modal>
 
       <LoginDialog open={loginOpen} onClose={() => setLoginOpen(false)} />
     </main>

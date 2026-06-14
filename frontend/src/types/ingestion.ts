@@ -38,6 +38,31 @@ export interface UploadResult {
   log_id: string;
 }
 
+// 削除可能な月次種別（バックエンド monthly_deletion.DELETABLE_KINDS と対応）
+export type DeletableKind =
+  | "monthly_metrics"
+  | "monthly_demographics"
+  | "monthly_video";
+
+// GET /api/ingestion/delete-preview のレスポンス（件数のみ・削除しない）
+export interface DeletePreviewResult {
+  kind: DeletableKind;
+  table: string;
+  year_month: string;
+  segment: MonthlySegment | null; // monthly_video は null
+  count: number;
+}
+
+// DELETE /api/ingestion/monthly のレスポンス
+export interface DeleteResult {
+  kind: DeletableKind;
+  table: string;
+  year_month: string;
+  segment: MonthlySegment | null;
+  deleted: number;
+  log_id: string;
+}
+
 export interface IngestionLog {
   id: string;
   source_type: string;

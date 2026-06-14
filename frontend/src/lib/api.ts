@@ -17,6 +17,9 @@ import type {
 } from "@/types/dashboard";
 import type { EventSummary } from "@/types/event-summary";
 import type {
+  DeletableKind,
+  DeletePreviewResult,
+  DeleteResult,
   IngestionLog,
   IngestType,
   MonthlyKind,
@@ -276,6 +279,52 @@ export async function uploadIngestionCsv(
 
 export function getIngestionLogs(): Promise<Page<IngestionLog>> {
   return apiGet<Page<IngestionLog>>("/api/ingestion/logs", { limit: 20 }, { auth: true });
+}
+
+// 削除プレビュー（件数のみ・読み取り専用。要ログイン）。実際には何も消さない。
+export function getDeletePreview(
+  kind: DeletableKind,
+  yearMonth: string,
+  segment?: MonthlySegment | null,
+): Promise<DeletePreviewResult> {
+  return apiGet<DeletePreviewResult>(
+    "/api/ingestion/delete-preview",
+    { kind, year_month: yearMonth, segment: segment ?? undefined },
+    { auth: true },
+  );
+}
+
+// 月次データの削除（要ログイン）。指定した月[+segment]のみを物理削除する。
+export async function deleteMonthlyData(
+  kind: DeletableKind,
+  yearMonth: string,
+  segment?: MonthlySegment | null,
+): Promise<DeleteResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const url = new URL("/api/ingestion/monthly", API_BASE_URL);
+  url.searchParams.set("kind", kind);
+  url.searchParams.set("year_month", yearMonth);
+  if (segment) url.searchParams.set("segment", segment);
+
+  let res: Response;
+  try {
+    res = await fetch(url.toString(), { method: "DELETE", headers });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as DeleteResult;
 }
 
 // 月次CSV（チャンネル全体データ）の投入（要ログイン）。

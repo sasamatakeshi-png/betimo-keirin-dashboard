@@ -41,6 +41,27 @@ class MonthlyVideoUploadResult(BaseModel):
     log_id: UUID
 
 
+class DeletePreviewResult(BaseModel):
+    """削除プレビュー（件数のみ。実際には削除しない）。"""
+
+    kind: str  # monthly_metrics | monthly_demographics | monthly_video
+    table: str
+    year_month: str
+    segment: str | None  # monthly_video は None
+    count: int
+
+
+class DeleteResult(BaseModel):
+    """削除実行結果（監査ログ付き）。"""
+
+    kind: str
+    table: str
+    year_month: str
+    segment: str | None
+    deleted: int
+    log_id: UUID
+
+
 class IngestionLogOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
