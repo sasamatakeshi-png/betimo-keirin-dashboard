@@ -470,16 +470,28 @@ def monthly_video_counts(db: Session = Depends(get_db)) -> MonthlyVideoCountsRes
 
 @router.get("/webcm-monthly", response_model=WebcmMonthlyResponse)
 def webcm_monthly(db: Session = Depends(get_db)) -> WebcmMonthlyResponse:
-    """WebCM（広告）の月別再生数を返す（確認用）。
+    """WebCM（広告）の月別・指標別合計を返す。
 
-    monthly_video_metrics の is_ad=true を year_month で集計し、
-    view_count 合計と本数を返す。view_count が全て NULL の月は 0。
-    第2段階でホームの「WebCMを除く/込む」切り替えに使う材料。
+    monthly_video_metrics の is_ad=true を year_month で集計し、加算可能な
+    指標（再生数・総再生時間・新規/ユニーク視聴者・インプレッション）の合計と
+    本数を返す。各指標は NULL を 0 として合算する。
+    ホームの「WebCMを除く/込む」切り替えに使う（差し引きは view_count /
+    total_watch_time_hours のみが加算的に正しく、視聴者数系は参考値）。
     """
     rows = db.execute(
         select(
             MonthlyVideoMetric.year_month.label("ym"),
             func.coalesce(func.sum(MonthlyVideoMetric.view_count), 0).label("views"),
+            func.coalesce(
+                func.sum(MonthlyVideoMetric.total_watch_time_hours), 0
+            ).label("watch"),
+            func.coalesce(func.sum(MonthlyVideoMetric.new_viewers), 0).label("new_v"),
+            func.coalesce(
+                func.sum(MonthlyVideoMetric.unique_viewers), 0
+            ).label("uniq_v"),
+            func.coalesce(
+                func.sum(MonthlyVideoMetric.impressions), 0
+            ).label("imp"),
             func.count().label("n"),
         )
         .where(MonthlyVideoMetric.is_ad.is_(True))
@@ -492,6 +504,10 @@ def webcm_monthly(db: Session = Depends(get_db)) -> WebcmMonthlyResponse:
             year_month=r.ym,
             webcm_view_count=int(r.views),
             ad_video_count=int(r.n),
+            ad_total_watch_time_hours=float(r.watch),
+            ad_new_viewers=int(r.new_v),
+            ad_unique_viewers=int(r.uniq_v),
+            ad_impressions=int(r.imp),
         )
         for r in rows
     ]

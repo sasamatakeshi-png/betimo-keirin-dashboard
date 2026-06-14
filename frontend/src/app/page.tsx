@@ -21,8 +21,14 @@ import {
   getMonthlyDemographics,
   getMonthlyMetrics,
   getMonthlyVideoCounts,
+  getWebcmMonthly,
 } from "@/lib/api";
 import { formatDateTime } from "@/lib/format";
+import {
+  adjustMetricsForWebcm,
+  totalWebcm,
+  type WebcmMode,
+} from "@/lib/webcm";
 import type {
   ChannelStatsResponse,
   HomeResponse,
@@ -30,6 +36,7 @@ import type {
   MonthlyMetricPoint,
   MonthlySegment,
   MonthlyVideoCountPoint,
+  WebcmMonthlyResponse,
 } from "@/types/dashboard";
 
 const SEGMENTS: { key: MonthlySegment; label: string }[] = [
@@ -65,6 +72,8 @@ interface HomeData {
   home: HomeResponse;
   // 総登録者数・総再生数の最新スナップショット（取得不可なら null＝CSV値で表示）
   channelStats: ChannelStatsResponse | null;
+  // WebCM（広告）の月別・指標別合計（取得不可なら null＝「込む」にフォールバック）
+  webcm: WebcmMonthlyResponse | null;
 }
 
 export default function HomePage() {
@@ -77,7 +86,7 @@ export default function HomePage() {
     setLoading(true);
     setError(null);
     try {
-      const [mAll, mLive, mShort, dAll, dLive, dShort, counts, home, channelStats] =
+      const [mAll, mLive, mShort, dAll, dLive, dShort, counts, home, channelStats, webcm] =
         await Promise.all([
           getMonthlyMetrics("all"),
           getMonthlyMetrics("live"),
@@ -89,6 +98,8 @@ export default function HomePage() {
           getDashboardHome(),
           // YouTube 取得（遅延更新つき）は失敗してもホーム全体を落とさない
           getChannelStats().catch(() => null),
+          // WebCM 集計の取得失敗もホーム全体を落とさない（null＝「込む」表示）
+          getWebcmMonthly().catch(() => null),
         ]);
       setData({
         metrics: { all: mAll.items, live: mLive.items, short: mShort.items },
@@ -96,6 +107,7 @@ export default function HomePage() {
         counts: counts.items,
         home,
         channelStats,
+        webcm,
       });
       setUpdatedAt(new Date());
     } catch (e) {
@@ -146,6 +158,13 @@ function DashboardContent({ data }: { data: HomeData }) {
   const [segment, setSegment] = useState<MonthlySegment>("all"); // 全体/ライブ/ショート
   const [period, setPeriod] = useState<PeriodKey>("all"); // 期間フィルタ
 
+  // --- WebCM（広告）除外トグル（ホーム全体に連動。既定=除く） ---
+  const [webcmMode, setWebcmMode] = useState<WebcmMode>("exclude");
+  const excludeWebcm = webcmMode === "exclude";
+  // WebCM 差し引きは加算的に正しい segment='all' のみ適用（live/short は対象外）。
+  const segmentAdjustable = segment === "all";
+  const webcmActive = excludeWebcm && data.webcm != null;
+
   // 性別年齢: 対象月ごとにキャッシュ。初期ロード分（最新月）を初期値に。
   const initialDemoMonth = data.demographics.all.year_month;
   const [demoByMonth, setDemoByMonth] = useState<
@@ -176,12 +195,40 @@ function DashboardContent({ data }: { data: HomeData }) {
   }, [selectedMonth, demoByMonth]);
 
   const segMetrics = data.metrics[segment];
-  const trendItems = slicePeriod(segMetrics, period);
+  // 推移グラフ・表用: segment='all' かつ「除く」のとき各月から WebCM 分を差し引く。
+  const adjustedSegMetrics = adjustMetricsForWebcm(
+    segMetrics,
+    data.webcm,
+    webcmMode,
+    segmentAdjustable,
+  );
+  const trendItems = slicePeriod(adjustedSegMetrics, period);
+  // 数値カードは常に segment='all'。「除く」のとき WebCM を差し引いた all を渡す。
+  const cardMetrics = adjustMetricsForWebcm(
+    data.metrics.all,
+    data.webcm,
+    webcmMode,
+    true,
+  );
+  // 累計（YouTube API 生涯値）から差し引く全期間 WebCM 再生数（「除く」時のみ）。
+  const webcmViewTotal = excludeWebcm ? totalWebcm(data.webcm, "view_count") : 0;
   const currentDemo = selectedMonth ? demoByMonth[selectedMonth] : undefined;
 
   return (
     <div className="space-y-6">
-      {/* 0. 対象月セレクタ（単月で見るもの＝数値カード単月・性別年齢に連動） */}
+      {/* 0a. WebCM（広告）除外トグル（ホーム全体に連動・既定=除く） */}
+      <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50/60 px-4 py-3">
+        <span className="text-sm font-medium">WebCM（広告）</span>
+        <WebcmToggle mode={webcmMode} onChange={setWebcmMode} />
+        <span className="text-xs text-muted-foreground">
+          {excludeWebcm
+            ? "※WebCM（広告）経由の再生を除いた数値です（再生数・総再生時間が対象）"
+            : "WebCM（広告）経由の再生を含む実数値です"}
+          {excludeWebcm && data.webcm == null && "（WebCMデータ取得不可のため実数表示）"}
+        </span>
+      </div>
+
+      {/* 0b. 対象月セレクタ（単月で見るもの＝数値カード単月・性別年齢に連動） */}
       <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 px-4 py-3">
         <span className="text-sm font-medium">対象月</span>
         <MonthSelector months={months} value={selectedMonth} onChange={setSelectedMonth} />
@@ -192,10 +239,12 @@ function DashboardContent({ data }: { data: HomeData }) {
 
       {/* 1. チャンネル全体サマリ（累計=全期間固定 + 単月=対象月） */}
       <MonthlySummaryCards
-        metrics={data.metrics.all}
+        metrics={cardMetrics}
         counts={data.counts}
         channelStats={data.channelStats}
         selectedMonth={selectedMonth}
+        excludeWebcm={webcmActive}
+        webcmViewTotal={webcmViewTotal}
       />
 
       {/* 2-3. 月次推移グラフ + データ表（segment + 期間フィルタ連動。対象月とは無関係） */}
@@ -204,7 +253,10 @@ function DashboardContent({ data }: { data: HomeData }) {
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div>
               <CardTitle className="text-base">月次推移</CardTitle>
-              <p className="mt-0.5 text-xs text-muted-foreground">全期間の推移（期間フィルタで範囲調整）</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                全期間の推移（期間フィルタで範囲調整）
+                {webcmActive && segmentAdjustable && "・再生数/総再生時間はWebCM除く"}
+              </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <PeriodToggle period={period} onChange={setPeriod} />
@@ -213,10 +265,16 @@ function DashboardContent({ data }: { data: HomeData }) {
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
-          <MonthlyTrendChart items={trendItems} />
+          <MonthlyTrendChart
+            items={trendItems}
+            webcmAdjusted={webcmActive && segmentAdjustable}
+          />
           <div>
             <div className="mb-2 text-sm font-medium text-muted-foreground">月次データ一覧</div>
-            <MonthlyTable items={trendItems} />
+            <MonthlyTable
+              items={trendItems}
+              webcmAdjusted={webcmActive && segmentAdjustable}
+            />
           </div>
         </CardContent>
       </Card>
@@ -277,6 +335,38 @@ function SegmentToggle({
           }`}
         >
           {s.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// WebCM（広告）除外トグル。既定=除く。ホーム全体の再生数系指標に連動。
+function WebcmToggle({
+  mode,
+  onChange,
+}: {
+  mode: WebcmMode;
+  onChange: (m: WebcmMode) => void;
+}) {
+  const opts: { key: WebcmMode; label: string }[] = [
+    { key: "exclude", label: "WebCM除く" },
+    { key: "include", label: "WebCM込む" },
+  ];
+  return (
+    <div className="inline-flex rounded-md border border-amber-300 p-0.5">
+      {opts.map((o) => (
+        <button
+          key={o.key}
+          type="button"
+          onClick={() => onChange(o.key)}
+          className={`rounded px-3 py-1 text-sm transition-colors ${
+            mode === o.key
+              ? "bg-amber-600 text-white"
+              : "text-muted-foreground hover:bg-amber-100"
+          }`}
+        >
+          {o.label}
         </button>
       ))}
     </div>

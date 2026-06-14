@@ -159,11 +159,22 @@ class MonthlyVideoCountsResponse(BaseModel):
 
 
 class WebcmMonthlyPoint(BaseModel):
-    """月別の WebCM 再生数。monthly_video_metrics の is_ad=true を集計。"""
+    """月別の WebCM（is_ad=true）の指標別合計。monthly_video_metrics を集計。
+
+    加算可能な指標のみを合算（比率系は対象外）。NULL は 0 として合算する。
+    フロントは「WebCM除く」表示で monthly_channel_metrics(all) からこれらを差し引く。
+    ただし unique_viewers / new_viewers はチャンネル側が重複排除済みのため
+    「全体 − WebCM」が負になり得る（合算不可）。差し引きは加算的な
+    view_count / total_watch_time_hours に限定し、本フィールドは参考値として返す。
+    """
 
     year_month: str  # 'YYYY-MM'
-    webcm_view_count: int  # その月の is_ad=true の view_count 合計
+    webcm_view_count: int  # その月の is_ad=true の view_count 合計（既存名・互換維持）
     ad_video_count: int  # その月の is_ad=true の動画本数
+    ad_total_watch_time_hours: float  # 総再生時間(h) 合計
+    ad_new_viewers: int  # 新規視聴者 合計（参考: 差し引きは非推奨）
+    ad_unique_viewers: int  # ユニーク視聴者 合計（参考: 差し引きは非推奨）
+    ad_impressions: int  # インプレッション 合計
 
 
 class WebcmMonthlyResponse(BaseModel):

@@ -102,11 +102,15 @@ export interface MonthlyVideoCountsResponse {
   items: MonthlyVideoCountPoint[]; // year_month 昇順
 }
 
-// GET /api/dashboard/webcm-monthly（WebCM=広告 の月別再生数。確認用）
+// GET /api/dashboard/webcm-monthly（WebCM=広告 の月別・指標別合計）
 export interface WebcmMonthlyPoint {
   year_month: string; // 'YYYY-MM'
   webcm_view_count: number; // is_ad=true の view_count 合計
   ad_video_count: number; // is_ad=true の本数
+  ad_total_watch_time_hours: number; // 総再生時間(h) 合計
+  ad_new_viewers: number; // 新規視聴者 合計（参考: 差し引きは非推奨）
+  ad_unique_viewers: number; // ユニーク視聴者 合計（参考: 差し引きは非推奨）
+  ad_impressions: number; // インプレッション 合計
 }
 
 export interface WebcmMonthlyResponse {

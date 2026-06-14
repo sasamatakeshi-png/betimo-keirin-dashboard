@@ -14,6 +14,7 @@ import {
 } from "recharts";
 
 import { formatNumber } from "@/lib/format";
+import { isWebcmAdjustedKey } from "@/lib/webcm";
 import type { MonthlyMetricPoint } from "@/types/dashboard";
 
 const SELF_BLUE = "#2563eb";
@@ -56,9 +57,19 @@ function ChartTooltip({ active, label, payload, metricLabel }: TooltipProps & { 
   );
 }
 
-export function MonthlyTrendChart({ items }: { items: MonthlyMetricPoint[] }) {
+export function MonthlyTrendChart({
+  items,
+  webcmAdjusted = false,
+}: {
+  items: MonthlyMetricPoint[];
+  // 「WebCM除く」適用中か。再生数・総再生時間の選択時に注記を出す。
+  // items 自体は呼び出し側で既に WebCM 差し引き済みを渡す前提。
+  webcmAdjusted?: boolean;
+}) {
   const [metric, setMetric] = useState<keyof MonthlyMetricPoint>("view_count");
   const metricLabel = METRICS.find((m) => m.key === metric)?.label ?? "";
+  // 選択中の指標が WebCM 差し引き対象（再生数/総再生時間）か。
+  const metricAdjusted = webcmAdjusted && isWebcmAdjustedKey(metric);
 
   const data = items.map((it) => ({
     ym: ymShort(it.year_month),
@@ -68,7 +79,7 @@ export function MonthlyTrendChart({ items }: { items: MonthlyMetricPoint[] }) {
   return (
     <div className="space-y-3">
       {/* 指標切替 */}
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         {METRICS.map((m) => (
           <button
             key={m.key}
@@ -81,8 +92,16 @@ export function MonthlyTrendChart({ items }: { items: MonthlyMetricPoint[] }) {
             }`}
           >
             {m.label}
+            {webcmAdjusted && isWebcmAdjustedKey(m.key) && (
+              <span className="ml-1 text-[10px] text-amber-600">CM除</span>
+            )}
           </button>
         ))}
+        {metricAdjusted && (
+          <span className="ml-1 text-[11px] text-amber-600">
+            ※WebCM（広告）分を各月から除外して表示
+          </span>
+        )}
       </div>
 
       {data.length === 0 ? (

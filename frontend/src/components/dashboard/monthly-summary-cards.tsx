@@ -148,6 +148,8 @@ export function MonthlySummaryCards({
   counts,
   channelStats = null,
   selectedMonth = null,
+  excludeWebcm = false,
+  webcmViewTotal = 0,
 }: {
   metrics: MonthlyMetricPoint[];
   counts: MonthlyVideoCountPoint[];
@@ -155,6 +157,12 @@ export function MonthlySummaryCards({
   channelStats?: ChannelStatsResponse | null;
   // 単月部分の対象月（'YYYY-MM'）。null/未指定なら最新月。累計部分には影響しない。
   selectedMonth?: string | null;
+  // 「WebCM除く」適用中か。再生数・総再生時間のカードに注記を出す。
+  // metrics は呼び出し側で既に WebCM 差し引き済みを渡す前提（単月・CSV累計に反映済み）。
+  excludeWebcm?: boolean;
+  // YouTube API 生涯累計（再生数）から差し引く全期間 WebCM 再生数。
+  // metrics の差し引きとは別に、API 累計値にのみ適用する。
+  webcmViewTotal?: number;
 }) {
   const { current: latest, prev } = pickMonth(metrics, selectedMonth);
   const monthLabel = ymLabel(latest?.year_month);
@@ -171,7 +179,12 @@ export function MonthlySummaryCards({
   }
 
   // 「再生数」「総登録者数」の累計欄: API値を優先し、無ければ CSV 合算へフォールバック。
-  const apiViews = channelStats?.view_count ?? null;
+  // 「WebCM除く」時は API 生涯累計（再生数）からも全期間 WebCM 分を差し引く。
+  const apiViewsRaw = channelStats?.view_count ?? null;
+  const apiViews =
+    apiViewsRaw != null && excludeWebcm
+      ? Math.max(0, apiViewsRaw - webcmViewTotal)
+      : apiViewsRaw;
   const apiSubs = channelStats?.subscriber_count ?? null;
   const snapDate = channelStats?.snapshot_date ?? null;
   // API由来のときは出所と取得日を注記、無ければ従来の累計（CSV）扱いと分かる注記。
@@ -193,9 +206,9 @@ export function MonthlySummaryCards({
         compareLabel={cmpLabel}
       />
       <SummaryCard
-        label="再生数"
+        label={excludeWebcm ? "再生数（WebCM除く）" : "再生数"}
         cumulative={apiViews ?? sumCol(metrics, "view_count")}
-        cumulativeLabel={apiNote(apiViews)}
+        cumulativeLabel={`${apiNote(apiViews)}${excludeWebcm ? "・WebCM除く" : ""}`}
         latest={latest?.view_count ?? null}
         prev={prev?.view_count ?? null}
         monthLabel={monthLabel}
@@ -211,8 +224,9 @@ export function MonthlySummaryCards({
         compareLabel={cmpLabel}
       />
       <SummaryCard
-        label="総再生時間"
+        label={excludeWebcm ? "総再生時間（WebCM除く）" : "総再生時間"}
         cumulative={sumCol(metrics, "total_watch_time_hours")}
+        cumulativeLabel={excludeWebcm ? "累計（全期間・WebCM除く）" : "累計（全期間）"}
         latest={latest?.total_watch_time_hours ?? null}
         prev={prev?.total_watch_time_hours ?? null}
         unit="時間"
