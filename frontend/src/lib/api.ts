@@ -17,6 +17,10 @@ import type {
 } from "@/types/dashboard";
 import type { EventSummary } from "@/types/event-summary";
 import type {
+  ProgramCandidatesResponse,
+  ProgramDetailResponse,
+} from "@/types/program-comparison";
+import type {
   DeletableKind,
   DeletePreviewResult,
   DeleteResult,
@@ -173,6 +177,30 @@ export function getWebcmMonthly(): Promise<WebcmMonthlyResponse> {
 // 守るため page 側では .catch(() => null) で握って描画を継続する。
 export function getChannelStats(): Promise<ChannelStatsResponse> {
   return apiGet<ChannelStatsResponse>("/api/dashboard/channel-stats");
+}
+
+// --- 番組比較（レポートP4。母集団=自社regular・program_typeありの142本。認証不要GET） ---
+
+// 比較対象に選べる番組一覧。race(レース名 title/event 部分一致) / program_type(種別) /
+// year_month(公開月 'YYYY-MM') で絞り込める（いずれも任意。指定なしで全142本）。
+export function getProgramCandidates(params?: {
+  race?: string;
+  program_type?: string;
+  year_month?: string;
+}): Promise<ProgramCandidatesResponse> {
+  return apiGet<ProgramCandidatesResponse>(
+    "/api/program-comparison/candidates",
+    params,
+  );
+}
+
+// 指定番組（UUIDカンマ区切り）の詳細指標。母集団外/不正IDは not_found に入る。
+export function getProgramDetail(
+  videoIds: string[],
+): Promise<ProgramDetailResponse> {
+  return apiGet<ProgramDetailResponse>("/api/program-comparison/detail", {
+    video_ids: videoIds.join(","),
+  });
 }
 
 export function getVideos(params?: QueryParams): Promise<Page<Video>> {

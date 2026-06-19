@@ -15,6 +15,7 @@ from app.api.events import router as events_router
 from app.api.health import router as health_router
 from app.api.ingestion import router as ingestion_router
 from app.api.metrics import router as metrics_router
+from app.api.program_comparison import router as program_comparison_router
 from app.api.timeseries import router as timeseries_router
 from app.api.videos import router as videos_router
 
@@ -42,6 +43,7 @@ app.include_router(dashboard_router, prefix="/api")
 app.include_router(events_router, prefix="/api")
 app.include_router(videos_router, prefix="/api")
 app.include_router(metrics_router, prefix="/api")
+app.include_router(program_comparison_router, prefix="/api")
 app.include_router(timeseries_router, prefix="/api")
 app.include_router(ingestion_router, prefix="/api")
 app.include_router(analysis_router, prefix="/api")
