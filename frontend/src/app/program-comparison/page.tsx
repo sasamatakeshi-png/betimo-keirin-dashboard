@@ -81,7 +81,7 @@ const PROGRAM_TYPE_BADGE: Record<string, string> = {
   プレミアムトーク: "bg-yellow-100 text-yellow-800", // 薄黄系（濃い黄土）
   ミッドナイト: "bg-slate-200 text-slate-700", // 薄グレー系
   ナイター: "bg-green-100 text-green-700", // 薄緑系
-  Bar: "bg-amber-100 text-amber-800", // 薄茶系
+  Bar: "bg-purple-100 text-purple-700", // 紫系（プレミアムトークの黄と判別しやすく）
 };
 // その他・未定義の無難なグレー。
 const PROGRAM_TYPE_BADGE_DEFAULT = "bg-gray-100 text-gray-600";
