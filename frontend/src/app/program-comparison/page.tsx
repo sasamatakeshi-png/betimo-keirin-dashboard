@@ -73,10 +73,40 @@ const dirColor: Record<"up" | "down" | "flat", string> = {
   flat: "text-muted-foreground",
 };
 
+// 種別 → バッジ配色（薄背景＋濃文字）。候補一覧・比較表ヘッダで共通利用。
+// キーは正規化後の値。表記ゆれ（全角/半角・Bar/バー）は canonicalProgramType で吸収。
+const PROGRAM_TYPE_BADGE: Record<string, string> = {
+  あす勝ち: "bg-blue-100 text-blue-700", // 青系
+  BKL: "bg-red-100 text-red-700", // 薄赤系
+  プレミアムトーク: "bg-yellow-100 text-yellow-800", // 薄黄系（濃い黄土）
+  ミッドナイト: "bg-slate-200 text-slate-700", // 薄グレー系
+  ナイター: "bg-green-100 text-green-700", // 薄緑系
+  Bar: "bg-amber-100 text-amber-800", // 薄茶系
+};
+// その他・未定義の無難なグレー。
+const PROGRAM_TYPE_BADGE_DEFAULT = "bg-gray-100 text-gray-600";
+
+// program_type の表記ゆれを吸収して配色マップのキーに揃える。
+// - NFKC で全角英数→半角（例: ＢＫＬ→BKL、Ｂａｒ→Bar）
+// - Bar / バー / ばー（大小問わず）は "Bar" に統一
+function canonicalProgramType(type: string): string {
+  const t = type.trim().normalize("NFKC");
+  if (t.toLowerCase() === "bar" || t === "バー" || t === "ばー") return "Bar";
+  return t;
+}
+
+function programTypeBadgeClass(type: string): string {
+  return PROGRAM_TYPE_BADGE[canonicalProgramType(type)] ?? PROGRAM_TYPE_BADGE_DEFAULT;
+}
+
 function ProgramTypeBadge({ type }: { type: string | null }) {
   if (!type) return <span className="text-muted-foreground">—</span>;
   return (
-    <span className="inline-block rounded bg-indigo-50 px-1.5 py-0.5 text-[10px] font-medium text-indigo-700">
+    <span
+      className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-medium ${programTypeBadgeClass(
+        type,
+      )}`}
+    >
       {type}
     </span>
   );
