@@ -29,6 +29,19 @@ export interface MonthlyVideoUploadResult {
   log_id: string;
 }
 
+// POST /api/ingestion/concurrent のレスポンス（schemas/ingestion.py ConcurrentUploadResult と対応）
+export interface ConcurrentUploadResult {
+  inserted_points: number; // metric_timeseries 新規投入点数
+  duplicate_points: number; // 既存と重複した点数
+  videos_total: number; // 対象3社+Betimo として処理した動画本数
+  videos_created: number; // うち新規作成した競合動画本数
+  scalars_written: number; // 保存した最大/平均同接の行数
+  skipped_rows: number; // 対象外チャンネル等でスキップした行数
+  start_time: string | null; // 設定シートの計測開始日時（JST）
+  used_youtube_api: boolean; // published_at 解決で YouTube API を呼んだか
+  log_id: string;
+}
+
 export interface UploadResult {
   inserted: number;
   skipped: number;

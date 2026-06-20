@@ -13,6 +13,7 @@ import {
   deleteMonthlyData,
   getDeletePreview,
   getIngestionLogs,
+  uploadConcurrentXlsx,
   uploadIngestionCsv,
   uploadMonthlyCsv,
   uploadMonthlyVideoCsv,
@@ -28,6 +29,7 @@ import {
   guessYearMonth,
 } from "@/lib/ingest-guess";
 import type {
+  ConcurrentUploadResult,
   DeletableKind,
   DeletePreviewResult,
   DeleteResult,
@@ -124,6 +126,16 @@ interface MonthlyRow {
   message: string | null;
 }
 
+// 同接xlsx・複数ファイル投入の1行分の状態
+type ConcRowStatus = "idle" | "uploading" | "success" | "error";
+interface ConcRow {
+  id: string;
+  fileName: string;
+  file: File;
+  status: ConcRowStatus;
+  message: string | null;
+}
+
 // 削除UI（取り込みの修正）。種別の表示ラベルとテーブル名。
 const DELETABLE_KIND_OPTIONS: { value: DeletableKind; label: string; table: string; hasSegment: boolean }[] = [
   { value: "monthly_metrics", label: "月次・数値", table: "monthly_channel_metrics", hasSegment: true },
@@ -203,6 +215,16 @@ export default function IngestPage() {
   const [videoResult, setVideoResult] = useState<MonthlyVideoUploadResult | null>(null);
   const [videoResultFile, setVideoResultFile] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
+
+  // 同時接続数xlsx（複数ファイルをまとめて順次投入。他の投入口とは独立）
+  const [concRows, setConcRows] = useState<ConcRow[]>([]);
+  const [concDragOver, setConcDragOver] = useState(false);
+  const [concBatchRunning, setConcBatchRunning] = useState(false);
+  const [concProgress, setConcProgress] = useState<{ current: number; total: number } | null>(
+    null,
+  );
+  const [concSummary, setConcSummary] = useState<{ success: number; fail: number } | null>(null);
+  const concRowIdRef = useRef(0);
 
   const [logs, setLogs] = useState<IngestionLog[]>([]);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -504,6 +526,88 @@ export default function IngestPage() {
     void loadLogs();
   }
 
+  // --- 同接xlsx バッチ投入 ---
+  function addConcFiles(files: FileList | File[] | null | undefined) {
+    if (!files) return;
+    const arr = Array.from(files).filter((f) => f.name.toLowerCase().endsWith(".xlsx"));
+    if (arr.length === 0) return;
+    setConcSummary(null);
+    setConcRows((rows) => {
+      const next = [...rows];
+      for (const f of arr) {
+        concRowIdRef.current += 1;
+        next.push({
+          id: `cc${concRowIdRef.current}`,
+          fileName: f.name,
+          file: f,
+          status: "idle",
+          message: null,
+        });
+      }
+      return next;
+    });
+  }
+
+  function updateConcRow(id: string, patch: Partial<ConcRow>) {
+    setConcRows((rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)));
+  }
+
+  function removeConcRow(id: string) {
+    setConcRows((rows) => rows.filter((r) => r.id !== id));
+  }
+
+  function clearConcRows() {
+    setConcRows([]);
+    setConcSummary(null);
+    setConcProgress(null);
+  }
+
+  async function handleUploadConcBatch() {
+    if (!canEdit || concBatchRunning) return;
+    // 未成功(idle/error)の行のみ処理 → 再実行で成功分を二重投入しない
+    const targets = concRows.filter((r) => r.status !== "success");
+    if (targets.length === 0) return;
+
+    setConcBatchRunning(true);
+    setConcSummary(null);
+    setConcProgress({ current: 0, total: targets.length });
+
+    let success = 0;
+    let fail = 0;
+    for (let i = 0; i < targets.length; i += 1) {
+      const row = targets[i];
+      setConcProgress({ current: i + 1, total: targets.length });
+      updateConcRow(row.id, { status: "uploading", message: null });
+      try {
+        const r: ConcurrentUploadResult = await uploadConcurrentXlsx(row.file);
+        success += 1;
+        const apiNote = r.used_youtube_api ? "・YouTube API使用" : "";
+        updateConcRow(row.id, {
+          status: "success",
+          message: `対象 ${formatNumber(r.videos_total)} 本（新規 ${formatNumber(
+            r.videos_created,
+          )}）・投入 ${formatNumber(r.inserted_points)} 点（重複 ${formatNumber(
+            r.duplicate_points,
+          )}）・最大/平均 ${formatNumber(r.scalars_written)} 件・対象外 ${formatNumber(
+            r.skipped_rows,
+          )} 行${apiNote}`,
+        });
+      } catch (e) {
+        fail += 1;
+        updateConcRow(row.id, {
+          status: "error",
+          message: e instanceof Error ? e.message : "アップロードに失敗しました",
+        });
+      }
+    }
+
+    setConcSummary({ success, fail });
+    setConcProgress(null);
+    setConcBatchRunning(false);
+    setLogsLoading(true);
+    void loadLogs();
+  }
+
   // ③ 削除フロー: 第1段階＝プレビュー件数を取得してモーダルを開く（まだ消さない）。
   async function openDeleteFlow(target: {
     kind: DeletableKind;
@@ -559,7 +663,7 @@ export default function IngestPage() {
       <header>
         <h1 className="text-2xl font-bold tracking-tight">データ取り込み</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          YouTube Studio のCSVをアップロードして番組データへ投入します（同接xlsxは次段階で対応）
+          YouTube Studio のCSV・同時接続数xlsxをアップロードして番組データへ投入します
         </p>
       </header>
 
@@ -1132,6 +1236,150 @@ export default function IngestPage() {
                 <span>スキップ(合計行/ID空) {formatNumber(videoResult.skipped)} 行</span>
                 {videoResult.replaced && <span>（同月同動画は置換）</span>}
               </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 同時接続数xlsxアップロード（1ファイル=1レース1日。Betimo＋競合3社の同接） */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">同時接続数xlsxアップロード</CardTitle>
+          {authRequired === true && !canEdit && (
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            同接監視ツールのxlsx（1ファイル＝1レース1日）を複数まとめて投入できます。「設定」シートの計測開始日時を起点に、Betimo＋競合3社（ぺーちゃんねる/オッズパーク/楽天Kドリームス）の同接時系列と最大/平均同接を保存します。対象外チャンネルの行は取り込みません。同じファイルを入れ直しても時系列は重複せず、最大/平均は最新で置換されます。
+          </p>
+
+          {/* ファイル選択（複数可・ドラッグ&ドロップ） */}
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setConcDragOver(true);
+            }}
+            onDragLeave={() => setConcDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setConcDragOver(false);
+              addConcFiles(e.dataTransfer.files);
+            }}
+            className={`flex h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm ${
+              concDragOver ? "border-blue-400 bg-blue-50/50" : "border-muted-foreground/25 hover:bg-muted/30"
+            }`}
+          >
+            <input
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                addConcFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+            <span>同接xlsxをドロップ、またはクリックして選択（複数可）</span>
+            <span className="text-xs text-muted-foreground">.xlsx</span>
+          </label>
+          <p className="text-[11px] text-muted-foreground">{NAMING_RULES.concurrent}</p>
+
+          {/* ファイルリスト */}
+          {concRows.length > 0 && (
+            <div className="space-y-2">
+              {concRows.map((row) => (
+                <div key={row.id} className="space-y-1 rounded-lg border p-3 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="truncate font-medium" title={row.fileName}>
+                      {row.fileName}
+                    </span>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {row.status === "uploading" && (
+                        <span className="text-xs text-blue-600">処理中…</span>
+                      )}
+                      {row.status === "success" && (
+                        <span className="rounded bg-green-50 px-1.5 py-0.5 text-xs text-green-700">✓ 成功</span>
+                      )}
+                      {row.status === "error" && (
+                        <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs text-red-600">✗ 失敗</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => removeConcRow(row.id)}
+                        disabled={concBatchRunning}
+                        className="rounded border px-2 py-0.5 text-xs hover:bg-muted disabled:opacity-50"
+                      >
+                        削除
+                      </button>
+                    </div>
+                  </div>
+                  {row.message && (
+                    <div
+                      className={`text-xs ${
+                        row.status === "error" ? "text-red-600" : "text-muted-foreground"
+                      }`}
+                    >
+                      {row.message}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* 実行 */}
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleUploadConcBatch()}
+              disabled={
+                !canEdit ||
+                concBatchRunning ||
+                concRows.length === 0 ||
+                concRows.every((r) => r.status === "success")
+              }
+              className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {concBatchRunning ? "取り込み中…" : "まとめて取り込み"}
+            </button>
+            {concRows.length > 0 && (
+              <button
+                type="button"
+                onClick={clearConcRows}
+                disabled={concBatchRunning}
+                className="rounded border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
+              >
+                クリア
+              </button>
+            )}
+            {concProgress && (
+              <span className="text-xs text-muted-foreground">
+                {concProgress.current}/{concProgress.total} 処理中…
+              </span>
+            )}
+            {!canEdit && probed && (
+              <span className="text-xs text-muted-foreground">投入にはログインが必要です</span>
+            )}
+          </div>
+
+          {/* サマリ */}
+          {concSummary && (
+            <div
+              className={`rounded-md border p-3 text-sm ${
+                concSummary.fail > 0
+                  ? "border-amber-200 bg-amber-50/50 text-amber-800"
+                  : "border-green-200 bg-green-50/50 text-green-800"
+              }`}
+            >
+              成功 {formatNumber(concSummary.success)} 件・失敗 {formatNumber(concSummary.fail)} 件
+              {concSummary.fail > 0 && "（失敗した行はそのまま「まとめて取り込み」で再実行できます）"}
             </div>
           )}
         </CardContent>

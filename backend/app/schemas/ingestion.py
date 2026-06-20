@@ -41,6 +41,20 @@ class MonthlyVideoUploadResult(BaseModel):
     log_id: UUID
 
 
+class ConcurrentUploadResult(BaseModel):
+    """同接xlsx（1ファイル=1レース1日）取り込み結果。"""
+
+    inserted_points: int  # metric_timeseries に新規投入した点数
+    duplicate_points: int  # 既存と重複でスキップした点数
+    videos_total: int  # 対象3社+Betimo として処理した動画本数
+    videos_created: int  # うち新規作成した競合動画本数
+    scalars_written: int  # 保存した最大/平均同接の行数（動画数×2）
+    skipped_rows: int  # 対象外チャンネル等でスキップした行数
+    start_time: datetime | None  # 設定シートの計測開始日時（JST）
+    used_youtube_api: bool  # published_at 解決で YouTube API を呼んだか
+    log_id: UUID
+
+
 class DeletePreviewResult(BaseModel):
     """削除プレビュー（件数のみ。実際には削除しない）。"""
 

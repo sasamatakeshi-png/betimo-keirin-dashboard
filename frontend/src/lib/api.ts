@@ -22,6 +22,7 @@ import type {
 } from "@/types/program-comparison";
 import type {
   DeletableKind,
+  ConcurrentUploadResult,
   DeletePreviewResult,
   DeleteResult,
   IngestionLog,
@@ -463,6 +464,39 @@ export async function uploadShortCsv(
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as UploadResult;
+}
+
+// 同時接続数xlsx（1ファイル=1レース1日）の投入（要ログイン）。file のみ multipart で送る。
+export async function uploadConcurrentXlsx(
+  file: File,
+): Promise<ConcurrentUploadResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const form = new FormData();
+  form.append("file", file);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/ingestion/concurrent", API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as ConcurrentUploadResult;
 }
 
 // --- AI分析 ---

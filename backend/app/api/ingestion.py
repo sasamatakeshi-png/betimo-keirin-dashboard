@@ -13,6 +13,7 @@ from app.core.security import get_current_auth
 from app.models import IngestionLog
 from app.schemas.common import Page, Pagination, pagination
 from app.schemas.ingestion import (
+    ConcurrentUploadResult,
     DeletePreviewResult,
     DeleteResult,
     IngestionLogOut,
@@ -20,6 +21,7 @@ from app.schemas.ingestion import (
     MonthlyVideoUploadResult,
     UploadResult,
 )
+from app.services.ccu_ingestion import ingest_ccu_xlsx
 from app.services.ingestion import (
     INGEST_TYPES,
     SHORT_INGEST_TYPES,
@@ -76,6 +78,35 @@ async def upload_csv(
     else:
         result = ingest_csv(db, content, file.filename, type)
     return UploadResult(**result)
+
+
+@router.post(
+    "/concurrent",
+    response_model=ConcurrentUploadResult,
+    dependencies=[Depends(get_current_auth)],
+)
+async def upload_concurrent_xlsx(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> ConcurrentUploadResult:
+    """同時接続数xlsx（1ファイル=1レース1日）を取り込む。
+
+    「設定」シートの計測開始日時と「データ」シートの時系列を読み、Betimo+競合3社の
+    同接を metric_timeseries（時系列）と metric_values（最大/平均）へ投入する。
+    対象外チャンネルの行はスキップ。複数ファイルはフロントから順次POSTする。
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="empty file"
+        )
+    try:
+        result = ingest_ccu_xlsx(db, content, file.filename)
+    except ValueError as exc:  # シート欠落・ヘッダ不正など
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return ConcurrentUploadResult(**result)
 
 
 @router.post(
