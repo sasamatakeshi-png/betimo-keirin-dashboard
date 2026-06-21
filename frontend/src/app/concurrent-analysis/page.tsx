@@ -18,8 +18,9 @@ import {
 } from "recharts";
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getChannels, getTimeseries, getVideos } from "@/lib/api";
+import { getChannels, getConcurrentRaces, getTimeseries, getVideos } from "@/lib/api";
 import { formatDate, formatNumber } from "@/lib/format";
+import type { RaceGroup } from "@/types/concurrent";
 import type { Channel, TimeseriesPoint, Video } from "@/types/video";
 
 const OWN_COLOR = "#2563eb"; // 自社=青・太線
@@ -68,6 +69,19 @@ function ConcurrentAnalysisInner() {
   const [series, setSeries] = useState<Record<string, TimeseriesPoint[]>>({});
   const [query, setQuery] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [races, setRaces] = useState<RaceGroup[]>([]);
+  const [selectedRaceKey, setSelectedRaceKey] = useState("");
+
+  // レース一覧（競合1社以上の日のみ）。レース選択の一括追加に使う。
+  useEffect(() => {
+    let alive = true;
+    getConcurrentRaces()
+      .then((r) => alive && setRaces(r))
+      .catch(() => alive && setRaces([])); // レース取得失敗は手動選択にフォールバック
+    return () => {
+      alive = false;
+    };
+  }, []);
 
   // 候補=自社+競合、チャンネル名はチャンネル一覧から引く
   useEffect(() => {
@@ -117,6 +131,13 @@ function ConcurrentAnalysisInner() {
       next.length ? `/concurrent-analysis?ids=${next.join(",")}` : "/concurrent-analysis",
       { scroll: false },
     );
+  }
+
+  // レース選択: そのレースの動画ID群で ids を置き換える（既存の重ね描き・比較表をそのまま再利用）。
+  function selectRace(raceKey: string) {
+    setSelectedRaceKey(raceKey);
+    const race = races.find((r) => r.race_key === raceKey);
+    if (race) setIds(race.videos.map((v) => v.video_id));
   }
 
   const channelName = (v: Video | undefined): string =>
@@ -202,6 +223,35 @@ function ConcurrentAnalysisInner() {
 
   return (
     <div className="space-y-6">
+      {/* レース選択: 選ぶと Betimo+競合3社が一括で ids に入る */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">レースを選ぶ</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-2">
+          <select
+            value={selectedRaceKey}
+            onChange={(e) => selectRace(e.target.value)}
+            className="w-full max-w-md rounded-md border px-3 py-1.5 text-sm"
+          >
+            <option value="">
+              {races.length === 0
+                ? "レースがありません（同接データ未取り込み）"
+                : "レースを選択（Betimo＋競合が自動で並びます）"}
+            </option>
+            {races.map((r) => (
+              <option key={r.race_key} value={r.race_key}>
+                {r.label}（競合{r.competitor_count}社）
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted-foreground">
+            レースを選ぶと、その日の Betimo＋競合の同接が下のグラフ・比較表に一括表示されます。
+            選択後は各番組を個別に削除・追加（下のピッカー）して調整できます。
+          </p>
+        </CardContent>
+      </Card>
+
       {/* 選択中の番組（チップ） */}
       <div className="flex flex-wrap items-center gap-2">
         {ids.length === 0 ? (

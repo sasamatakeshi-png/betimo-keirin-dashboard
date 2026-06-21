@@ -15,6 +15,7 @@ import type {
   MonthlyVideoCountsResponse,
   WebcmMonthlyResponse,
 } from "@/types/dashboard";
+import type { RaceGroup } from "@/types/concurrent";
 import type { EventSummary } from "@/types/event-summary";
 import type {
   ProgramCandidatesResponse,
@@ -252,6 +253,11 @@ export function getTimeseries(
 
 export function getChannels(): Promise<Page<Channel>> {
   return apiGet<Page<Channel>>("/api/channels", { limit: 50 });
+}
+
+// 同接データを持つレース一覧（競合1社以上の日のみ・日付の新しい順）。認証不要GET。
+export function getConcurrentRaces(): Promise<RaceGroup[]> {
+  return apiGet<RaceGroup[]>("/api/concurrent/races");
 }
 
 export function getEvents(params?: QueryParams): Promise<Page<EventLite>> {
