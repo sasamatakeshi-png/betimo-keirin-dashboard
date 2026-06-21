@@ -50,6 +50,7 @@ class ConcurrentUploadResult(BaseModel):
     videos_created: int  # うち新規作成した競合動画本数
     scalars_written: int  # 保存した最大/平均同接の行数（動画数×2）
     skipped_rows: int  # 対象外チャンネル等でスキップした行数
+    failed_videos: int = 0  # 不備によりスキップした動画本数（詳細は ingestion_logs）
     start_time: datetime | None  # 設定シートの計測開始日時（JST）
     used_youtube_api: bool  # published_at 解決で YouTube API を呼んだか
     log_id: UUID

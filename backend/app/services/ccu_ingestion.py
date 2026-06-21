@@ -81,6 +81,10 @@ def _resolve_or_create_video(
     video = db.scalar(select(Video).where(Video.youtube_video_id == video_id))
     created = False
     if video is None:
+        # created_at / updated_at は DB に DEFAULT now() があるが、ORM モデルに
+        # server_default を宣言していないため、未設定だと INSERT に NULL が積まれ
+        # NOT NULL 制約違反になる（既存 _upsert_scalar のコメント参照）。明示的に入れる。
+        now = datetime.now(timezone.utc)
         video = Video(
             youtube_video_id=video_id,
             channel_id=channel.id,
@@ -89,6 +93,8 @@ def _resolve_or_create_video(
             content_type="regular",
             cast_members=[],
             thumbnail_url=_thumbnail_url(video_id),
+            created_at=now,
+            updated_at=now,
         )
         db.add(video)
         db.flush()  # video.id を確定
@@ -263,6 +269,46 @@ def _write_scalars(
     return written
 
 
+def _process_video(
+    db: Session,
+    *,
+    video_id: str,
+    pts: list[dict],
+    channel: Channel,
+    start_time: datetime | None,
+    source_file: str | None,
+    allow_api: bool,
+) -> dict:
+    """1動画分（解決/作成→時系列→スカラー）を処理して件数を返す。
+
+    呼び出し側で SAVEPOINT（db.begin_nested）内から呼ぶこと。途中で例外が出ても
+    SAVEPOINT のロールバックで当該動画分だけ巻き戻り、他動画・ログ記録は生き残る。
+    """
+    video, created = _resolve_or_create_video(
+        db, video_id=video_id, channel=channel, title=pts[0]["title"]
+    )
+    recorded_min = min(p["recorded_at"] for p in pts)
+    recorded_max = max(p["recorded_at"] for p in pts)
+    origin, api_used = _resolve_published_at(
+        db,
+        video,
+        xlsx_start=start_time,
+        recorded_min=recorded_min,
+        allow_api=allow_api,
+    )
+    ins, dup = _insert_timeseries(db, video=video, points=pts, origin=origin)
+    scalars = _write_scalars(
+        db, video=video, points=pts, recorded_at=recorded_max, source_file=source_file
+    )
+    return {
+        "created": created,
+        "inserted": ins,
+        "duplicates": dup,
+        "scalars": scalars,
+        "used_api": api_used,
+    }
+
+
 def ingest_ccu_xlsx(
     db: Session,
     content: bytes,
@@ -293,8 +339,10 @@ def ingest_ccu_xlsx(
     videos_created = 0
     scalars_written = 0
     skipped_rows = 0
+    failed_points = 0
     used_api = False
     skipped_channels: dict[str, int] = {}
+    failed_videos: list[dict] = []
 
     for video_id, pts in by_video.items():
         channel_name = pts[0]["channel_name"]
@@ -306,41 +354,53 @@ def ingest_ccu_xlsx(
             skipped_channels[channel_name] = skipped_channels.get(channel_name, 0) + len(pts)
             continue
 
-        video, created = _resolve_or_create_video(
-            db, video_id=video_id, channel=channel, title=pts[0]["title"]
-        )
+        # 1動画 = 1 SAVEPOINT。途中で失敗してもその動画分だけ巻き戻し、処理を継続。
+        # （以前は1動画の例外で全体が 500 になり、何も保存されなかった。）
+        try:
+            with db.begin_nested():
+                stats = _process_video(
+                    db,
+                    video_id=video_id,
+                    pts=pts,
+                    channel=channel,
+                    start_time=start_time,
+                    source_file=filename,
+                    allow_api=allow_api,
+                )
+        except Exception as exc:  # noqa: BLE001 - 不備動画はスキップして継続する方針
+            failed_points += len(pts)
+            failed_videos.append(
+                {
+                    "youtube_video_id": video_id,
+                    "channel_name": channel_name,
+                    "points": len(pts),
+                    "reason": f"{type(exc).__name__}: {exc}"[:300],
+                }
+            )
+            continue
+
         videos_total += 1
-        if created:
+        if stats["created"]:
             videos_created += 1
+        inserted_points += stats["inserted"]
+        duplicate_points += stats["duplicates"]
+        scalars_written += stats["scalars"]
+        used_api = used_api or stats["used_api"]
 
-        recorded_min = min(p["recorded_at"] for p in pts)
-        recorded_max = max(p["recorded_at"] for p in pts)
-        origin, api_used = _resolve_published_at(
-            db,
-            video,
-            xlsx_start=start_time,
-            recorded_min=recorded_min,
-            allow_api=allow_api,
-        )
-        used_api = used_api or api_used
+    if failed_videos and videos_total == 0:
+        status = "failed"  # 対象動画が全滅
+    elif failed_videos:
+        status = "partial"  # 一部成功・一部失敗
+    elif videos_total > 0:
+        status = "success"
+    else:
+        status = "partial" if skipped_rows else "failed"
 
-        ins, dup = _insert_timeseries(db, video=video, points=pts, origin=origin)
-        inserted_points += ins
-        duplicate_points += dup
-        scalars_written += _write_scalars(
-            db,
-            video=video,
-            points=pts,
-            recorded_at=recorded_max,
-            source_file=filename,
-        )
-
-    status = "success" if videos_total > 0 else ("partial" if skipped_rows else "failed")
     log = IngestionLog(
         source_type=LOG_SOURCE_TYPE,
         file_name=filename,
         records_processed=inserted_points,
-        records_failed=0,
+        records_failed=failed_points,
         status=status,
         started_at=started_at,
         completed_at=datetime.now(timezone.utc),
@@ -349,6 +409,7 @@ def ingest_ccu_xlsx(
             "videos_total": videos_total,
             "videos_created": videos_created,
             "skipped_channels": skipped_channels or None,
+            "failed_videos": failed_videos or None,
             "used_youtube_api": used_api,
         },
     )
@@ -363,6 +424,7 @@ def ingest_ccu_xlsx(
         "videos_created": videos_created,
         "scalars_written": scalars_written,
         "skipped_rows": skipped_rows,
+        "failed_videos": len(failed_videos),
         "start_time": start_time,
         "used_youtube_api": used_api,
         "log_id": log.id,

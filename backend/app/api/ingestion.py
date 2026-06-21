@@ -102,9 +102,18 @@ async def upload_concurrent_xlsx(
         )
     try:
         result = ingest_ccu_xlsx(db, content, file.filename)
-    except ValueError as exc:  # シート欠落・ヘッダ不正など
+    except ValueError as exc:  # シート欠落・ヘッダ不正など（ファイル内容の問題）
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"ファイルの内容を解釈できません: {exc}",
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 - 想定外でも素っ気ない500を避け原因を返す
+        # 個々の動画の不備は service 内 SAVEPOINT でスキップ済み。ここに来るのは
+        # commit 失敗など全体的な障害のみ。失敗トランザクションは明示的に巻き戻す。
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"同接取り込みに失敗しました: {type(exc).__name__}: {exc}",
         ) from exc
     return ConcurrentUploadResult(**result)
 
