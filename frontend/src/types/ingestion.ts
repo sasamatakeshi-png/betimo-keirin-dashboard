@@ -42,6 +42,43 @@ export interface ConcurrentUploadResult {
   log_id: string;
 }
 
+// Studio自社同接CSV（schemas/ingestion.py StudioCcu* と対応）
+export interface StudioCcuCandidate {
+  video_id: string;
+  title: string;
+  youtube_video_id: string | null;
+  published_at: string | null;
+  score: number;
+  date_match: boolean;
+}
+
+// POST /api/ingestion/studio-ccu/preview のレスポンス（保存しない）
+export interface StudioCcuPreviewResult {
+  filename: string | null;
+  row_count: number;
+  blank_or_invalid: number;
+  duration_seconds: number;
+  max_concurrent: number;
+  avg_concurrent: number;
+  parsed_month: number | null;
+  parsed_day: number | null;
+  race_name: string | null;
+  suggested_video_id: string | null;
+  candidates: StudioCcuCandidate[];
+}
+
+// POST /api/ingestion/studio-ccu/commit のレスポンス（max/avgをStudio値で上書き）
+export interface StudioCcuCommitResult {
+  video_id: string;
+  title: string;
+  youtube_video_id: string | null;
+  max_concurrent: number;
+  avg_concurrent: number;
+  row_count: number;
+  replaced: boolean;
+  log_id: string;
+}
+
 export interface UploadResult {
   inserted: number;
   skipped: number;

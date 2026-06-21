@@ -33,6 +33,8 @@ import type {
   MonthlyUploadResult,
   MonthlyVideoUploadResult,
   ShortIngestType,
+  StudioCcuCommitResult,
+  StudioCcuPreviewResult,
   UploadResult,
 } from "@/types/ingestion";
 import type {
@@ -503,6 +505,72 @@ export async function uploadConcurrentXlsx(
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as ConcurrentUploadResult;
+}
+
+// Studio自社同接CSV: プレビュー（計算＋動画候補。保存しない・要ログイン）。
+export async function previewStudioCcu(file: File): Promise<StudioCcuPreviewResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const form = new FormData();
+  form.append("file", file);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/ingestion/studio-ccu/preview", API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as StudioCcuPreviewResult;
+}
+
+// Studio自社同接CSV: 確定保存（選んだ自社動画に max/avg をStudio値で上書き・要ログイン）。
+export async function commitStudioCcu(
+  file: File,
+  videoId: string,
+): Promise<StudioCcuCommitResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("video_id", videoId);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/ingestion/studio-ccu/commit", API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as StudioCcuCommitResult;
 }
 
 // --- AI分析 ---

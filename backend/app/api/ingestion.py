@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy import func, select
@@ -19,9 +20,12 @@ from app.schemas.ingestion import (
     IngestionLogOut,
     MonthlyUploadResult,
     MonthlyVideoUploadResult,
+    StudioCcuCommitResult,
+    StudioCcuPreviewResult,
     UploadResult,
 )
 from app.services.ccu_ingestion import ingest_ccu_xlsx
+from app.services.studio_ccu_ingestion import commit_studio_ccu, preview_studio_ccu
 from app.services.ingestion import (
     INGEST_TYPES,
     SHORT_INGEST_TYPES,
@@ -116,6 +120,68 @@ async def upload_concurrent_xlsx(
             detail=f"同接取り込みに失敗しました: {type(exc).__name__}: {exc}",
         ) from exc
     return ConcurrentUploadResult(**result)
+
+
+@router.post(
+    "/studio-ccu/preview",
+    response_model=StudioCcuPreviewResult,
+    dependencies=[Depends(get_current_auth)],
+)
+async def studio_ccu_preview(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> StudioCcuPreviewResult:
+    """Studio自社同接CSVを計算し、ファイル名から動画候補を推測して返す（保存しない）。
+
+    最大=「ライブ同時視聴者数」列の最大、平均=「平均同時視聴者数」列の平均。
+    ファイル名の日付・レース名で自社動画(is_competitor=false)の候補を提示する。
+    実際の保存は確認後に /studio-ccu/commit で行う（人の確認を必ず挟む）。
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty file")
+    try:
+        result = preview_studio_ccu(db, content, file.filename)
+    except ValueError as exc:  # CSV内容の問題（ヘッダ不正・有効行なし等）
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"CSVを解釈できません: {exc}",
+        ) from exc
+    return StudioCcuPreviewResult(**result)
+
+
+@router.post(
+    "/studio-ccu/commit",
+    response_model=StudioCcuCommitResult,
+    dependencies=[Depends(get_current_auth)],
+)
+async def studio_ccu_commit(
+    file: UploadFile = File(...),
+    video_id: UUID = Form(..., description="確定した自社動画のUUID"),
+    db: Session = Depends(get_db),
+) -> StudioCcuCommitResult:
+    """確定した自社動画に Studio計算値（最大/平均同接）を常に上書き保存する（冪等）。
+
+    サーバ側でCSVを再計算（クライアント値は信用しない）。該当 video の
+    max/avg_concurrent_viewers（source='manual'）を削除→再挿入で置換する。
+    時系列・競合データには触れない。
+    """
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty file")
+    try:
+        result = commit_studio_ccu(db, content, file.filename, video_id)
+    except ValueError as exc:  # CSV内容 or 動画選択の問題
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    except Exception as exc:  # noqa: BLE001 - 素っ気ない500を避け原因を返す
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"保存に失敗しました: {type(exc).__name__}: {exc}",
+        ) from exc
+    return StudioCcuCommitResult(**result)
 
 
 @router.post(

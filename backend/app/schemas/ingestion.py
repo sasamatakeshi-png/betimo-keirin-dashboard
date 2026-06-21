@@ -56,6 +56,46 @@ class ConcurrentUploadResult(BaseModel):
     log_id: UUID
 
 
+class StudioCcuCandidate(BaseModel):
+    """Studio自社同接CSVの動画候補（自社regular動画）。"""
+
+    video_id: UUID
+    title: str
+    youtube_video_id: str | None
+    published_at: datetime | None
+    score: int  # 推測スコア（日付一致+2 / レース名一致+1）
+    date_match: bool  # 公開日(JST)の月日がファイル名と一致
+
+
+class StudioCcuPreviewResult(BaseModel):
+    """Studio自社同接CSVのプレビュー（計算値＋動画候補。保存はしない）。"""
+
+    filename: str | None
+    row_count: int  # 有効データ行数
+    blank_or_invalid: int  # 空行・非数でスキップした行数
+    duration_seconds: int  # 位置秒の最大（配信長の目安）
+    max_concurrent: int  # ライブ同時視聴者数の最大
+    avg_concurrent: int  # 平均同時視聴者数の平均（四捨五入）
+    parsed_month: int | None  # ファイル名から推測した月
+    parsed_day: int | None  # ファイル名から推測した日
+    race_name: str | None  # ファイル名から推測したレース名
+    suggested_video_id: UUID | None  # 推奨動画（候補先頭・スコア>0のとき）
+    candidates: list[StudioCcuCandidate]
+
+
+class StudioCcuCommitResult(BaseModel):
+    """Studio自社同接CSVの確定保存結果（max/avgをStudio値で上書き）。"""
+
+    video_id: UUID
+    title: str
+    youtube_video_id: str | None
+    max_concurrent: int
+    avg_concurrent: int
+    row_count: int
+    replaced: bool  # 既存スカラーを置換したか（常に True）
+    log_id: UUID
+
+
 class DeletePreviewResult(BaseModel):
     """削除プレビュー（件数のみ。実際には削除しない）。"""
 

@@ -10,9 +10,11 @@ import { Modal } from "@/components/modal";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   ApiError,
+  commitStudioCcu,
   deleteMonthlyData,
   getDeletePreview,
   getIngestionLogs,
+  previewStudioCcu,
   uploadConcurrentXlsx,
   uploadIngestionCsv,
   uploadMonthlyCsv,
@@ -20,7 +22,7 @@ import {
   uploadShortCsv,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
-import { formatDateTime, formatNumber } from "@/lib/format";
+import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
 import {
   NAMING_RULES,
   guessMonthly,
@@ -39,6 +41,8 @@ import type {
   MonthlySegment,
   MonthlyVideoUploadResult,
   ShortIngestType,
+  StudioCcuCommitResult,
+  StudioCcuPreviewResult,
   UploadResult,
 } from "@/types/ingestion";
 
@@ -225,6 +229,15 @@ export default function IngestPage() {
   );
   const [concSummary, setConcSummary] = useState<{ success: number; fail: number } | null>(null);
   const concRowIdRef = useRef(0);
+
+  // Studio自社同接CSV（2段階: アップロード→推測表示→確認→保存。他の投入口とは独立）
+  const [studioFile, setStudioFile] = useState<File | null>(null);
+  const [studioDragOver, setStudioDragOver] = useState(false);
+  const [studioBusy, setStudioBusy] = useState(false); // preview or commit 実行中
+  const [studioPreview, setStudioPreview] = useState<StudioCcuPreviewResult | null>(null);
+  const [studioSelectedId, setStudioSelectedId] = useState<string>("");
+  const [studioResult, setStudioResult] = useState<StudioCcuCommitResult | null>(null);
+  const [studioError, setStudioError] = useState<string | null>(null);
 
   const [logs, setLogs] = useState<IngestionLog[]>([]);
   const [logsError, setLogsError] = useState<string | null>(null);
@@ -606,6 +619,47 @@ export default function IngestPage() {
     setConcBatchRunning(false);
     setLogsLoading(true);
     void loadLogs();
+  }
+
+  // --- Studio自社同接CSV: ①ファイル選択で自動プレビュー（計算＋動画推測） ---
+  async function pickStudioFile(f: File | undefined | null) {
+    if (!f || !canEdit) return;
+    setStudioFile(f);
+    setStudioResult(null);
+    setStudioError(null);
+    setStudioPreview(null);
+    setStudioSelectedId("");
+    setStudioBusy(true);
+    try {
+      const pv = await previewStudioCcu(f);
+      setStudioPreview(pv);
+      // 推測があれば既定選択、無ければ候補先頭（人が選び直せる）
+      setStudioSelectedId(pv.suggested_video_id ?? pv.candidates[0]?.video_id ?? "");
+    } catch (e) {
+      setStudioError(e instanceof Error ? e.message : "プレビューに失敗しました");
+    } finally {
+      setStudioBusy(false);
+    }
+  }
+
+  // --- Studio自社同接CSV: ②確認後に確定保存（max/avgをStudio値で上書き） ---
+  async function handleStudioCommit() {
+    if (!studioFile || !studioSelectedId || !canEdit || studioBusy) return;
+    setStudioBusy(true);
+    setStudioError(null);
+    try {
+      const r = await commitStudioCcu(studioFile, studioSelectedId);
+      setStudioResult(r);
+      setStudioFile(null);
+      setStudioPreview(null);
+      setStudioSelectedId("");
+      setLogsLoading(true);
+      void loadLogs();
+    } catch (e) {
+      setStudioError(e instanceof Error ? e.message : "保存に失敗しました");
+    } finally {
+      setStudioBusy(false);
+    }
   }
 
   // ③ 削除フロー: 第1段階＝プレビュー件数を取得してモーダルを開く（まだ消さない）。
@@ -1380,6 +1434,163 @@ export default function IngestPage() {
             >
               成功 {formatNumber(concSummary.success)} 件・失敗 {formatNumber(concSummary.fail)} 件
               {concSummary.fail > 0 && "（失敗した行はそのまま「まとめて取り込み」で再実行できます）"}
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Studio自社同接CSV（自社1番組の正確な最大/平均同接で上書き。2段階＝推測→確認→保存） */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">Studio自社同接CSV（最大/平均を上書き）</CardTitle>
+          {authRequired === true && !canEdit && (
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            YouTube Studio の自社同接CSV（1ファイル＝自社1番組・60秒ごと）。最大＝「ライブ同時視聴者数」の最大、平均＝「平均同時視聴者数」の平均で算出し、選んだ自社動画の最大/平均同接を
+            <span className="font-medium">Studio値で常に上書き</span>します（同接xlsxより正確）。アップロードすると推測した動画を表示するので、確認・修正してから保存してください。
+          </p>
+
+          {/* ファイル選択（アップロードで自動プレビュー） */}
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setStudioDragOver(true);
+            }}
+            onDragLeave={() => setStudioDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setStudioDragOver(false);
+              void pickStudioFile(e.dataTransfer.files?.[0]);
+            }}
+            className={`flex h-24 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm ${
+              studioDragOver ? "border-blue-400 bg-blue-50/50" : "border-muted-foreground/25 hover:bg-muted/30"
+            }`}
+          >
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              disabled={!canEdit || studioBusy}
+              onChange={(e) => {
+                void pickStudioFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            {studioFile ? (
+              <>
+                <span className="font-medium">{studioFile.name}</span>
+                <span className="text-xs text-muted-foreground">クリックで選び直し</span>
+              </>
+            ) : (
+              <>
+                <span>Studio自社同接CSVをドロップ、またはクリックして選択</span>
+                <span className="text-xs text-muted-foreground">.csv（UTF-8 / Shift_JIS 両対応）</span>
+              </>
+            )}
+          </label>
+          <p className="text-[11px] text-muted-foreground">
+            ファイル名に日付・レース名があると動画を推測します（例「ライブ 【競輪ライブ6_21】#高松宮記念杯競輪 …」→ 6/21・高松宮記念）。推測できない場合は候補から手動で選べます。
+          </p>
+
+          {!canEdit && probed && (
+            <span className="text-xs text-muted-foreground">投入にはログインが必要です</span>
+          )}
+
+          {studioBusy && !studioPreview && !studioResult && (
+            <div className="py-2 text-center text-sm text-muted-foreground">解析中…</div>
+          )}
+
+          {/* プレビュー（計算値＋推測動画の確認） */}
+          {studioPreview && !studioResult && (
+            <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+              <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+                <span>
+                  最大同接 <span className="font-semibold tabular-nums">{formatNumber(studioPreview.max_concurrent)}</span>
+                </span>
+                <span>
+                  平均同接 <span className="font-semibold tabular-nums">{formatNumber(studioPreview.avg_concurrent)}</span>
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {formatNumber(studioPreview.row_count)} 行
+                  {studioPreview.race_name ? `・推測: ${studioPreview.parsed_month}/${studioPreview.parsed_day} ${studioPreview.race_name}` : "・ファイル名から日付/レース名を推測できませんでした"}
+                </span>
+              </div>
+
+              <label className="block text-xs text-muted-foreground">
+                保存先の自社動画（確認・修正してください）
+                <select
+                  value={studioSelectedId}
+                  onChange={(e) => setStudioSelectedId(e.target.value)}
+                  disabled={studioBusy}
+                  className="mt-1 block w-full rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+                >
+                  <option value="">— 動画を選択 —</option>
+                  {studioPreview.candidates.map((c) => (
+                    <option key={c.video_id} value={c.video_id}>
+                      {c.date_match ? "★ " : ""}
+                      {c.published_at ? `${formatDate(c.published_at)} ` : ""}
+                      {c.title}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {studioPreview.suggested_video_id == null && (
+                <p className="text-[11px] text-amber-700">
+                  ⚠ ファイル名から動画を自動推測できませんでした。候補から正しい自社動画を選んでください。
+                </p>
+              )}
+
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => void handleStudioCommit()}
+                  disabled={!studioSelectedId || !canEdit || studioBusy}
+                  className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {studioBusy ? "保存中…" : "この動画に保存（Studio値で上書き）"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStudioFile(null);
+                    setStudioPreview(null);
+                    setStudioSelectedId("");
+                    setStudioError(null);
+                  }}
+                  disabled={studioBusy}
+                  className="rounded border px-3 py-1.5 text-sm hover:bg-muted disabled:opacity-50"
+                >
+                  キャンセル
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* エラー / 結果 */}
+          {studioError && (
+            <div className="rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600">
+              {studioError}
+            </div>
+          )}
+          {studioResult && (
+            <div className="rounded-md border border-green-200 bg-green-50/50 p-3 text-sm">
+              <div className="font-medium text-green-800">
+                上書き保存しました: {studioResult.title}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>最大同接 {formatNumber(studioResult.max_concurrent)}</span>
+                <span>平均同接 {formatNumber(studioResult.avg_concurrent)}</span>
+                <span>{formatNumber(studioResult.row_count)} 行から算出</span>
+              </div>
             </div>
           )}
         </CardContent>
