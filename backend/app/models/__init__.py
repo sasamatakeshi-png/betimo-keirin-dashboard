@@ -14,6 +14,7 @@ from app.models.entities import (
     MonthlyDemographic,
     MonthlyVideoMetric,
     Video,
+    XDailyMetric,
 )
 
 __all__ = [
@@ -32,4 +33,5 @@ __all__ = [
     "IngestionLog",
     "AnalysisTemplate",
     "AnalysisResult",
+    "XDailyMetric",
 ]

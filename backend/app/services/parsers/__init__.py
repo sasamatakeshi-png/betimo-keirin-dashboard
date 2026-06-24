@@ -17,6 +17,7 @@ from app.services.parsers.traffic_source_parsers import (
     parse_related_video_csv,
     parse_traffic_source_csv,
 )
+from app.services.parsers.x_csv_parser import parse_x_csv
 
 __all__ = [
     "parse_zenkikan_csv",
@@ -30,6 +31,7 @@ __all__ = [
     "parse_traffic_source_csv",
     "parse_external_url_csv",
     "parse_related_video_csv",
+    "parse_x_csv",
     "map_age_band",
     "map_gender",
 ]

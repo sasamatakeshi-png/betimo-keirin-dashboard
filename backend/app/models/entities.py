@@ -10,6 +10,7 @@ from sqlalchemy import (
     BigInteger,
     Boolean,
     Column,
+    Computed,
     Date,
     DateTime,
     ForeignKey,
@@ -307,5 +308,35 @@ class ChannelTrafficSource(Base):
     view_count = Column(Integer)
     avg_watch_seconds = Column(Integer)
     total_watch_hours = Column(Numeric)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+
+
+class XDailyMetric(Base):
+    """X(旧Twitter)アカウントの日別メトリクス。007_x_daily_metrics.sql。
+
+    X アナリティクスの日別エクスポート(1行=1日)。自社1アカウント前提で date 一意・
+    再投入=置換(upsert)。net_follows は生成列(INSERT/UPDATE には含めない)。
+    """
+
+    __tablename__ = "x_daily_metrics"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
+    date = Column(Date, nullable=False)
+    imp = Column(Integer)
+    likes = Column(Integer)
+    engagements = Column(Integer)
+    bookmarks = Column(Integer)
+    shares = Column(Integer)
+    follows_gained = Column(Integer)
+    unfollows = Column(Integer)
+    # 生成列(GENERATED ALWAYS AS (follows_gained - unfollows) STORED)。書き込み不可。
+    net_follows = Column(Integer, Computed("follows_gained - unfollows", persisted=True))
+    replies = Column(Integer)
+    reposts = Column(Integer)
+    profile_visits = Column(Integer)
+    posts_created = Column(Integer)
+    video_views = Column(Integer)
+    media_views = Column(Integer)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))

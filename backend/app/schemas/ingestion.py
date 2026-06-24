@@ -51,6 +51,16 @@ class TrafficSourceResult(BaseModel):
     log_id: UUID
 
 
+class XCsvResult(BaseModel):
+    """X(旧Twitter)日別CSV取り込み結果。"""
+
+    rows_written: int  # upsert した日数
+    skipped: int  # 日付重複で集約された行数
+    date_from: str | None  # 取り込んだ最古日 'YYYY-MM-DD'
+    date_to: str | None  # 取り込んだ最新日 'YYYY-MM-DD'
+    log_id: UUID
+
+
 class ConcurrentUploadResult(BaseModel):
     """同接xlsx（1ファイル=1レース1日）取り込み結果。"""
 

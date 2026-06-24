@@ -38,6 +38,7 @@ import type {
   TrafficSourceKind,
   TrafficSourceResult,
   UploadResult,
+  XCsvResult,
 } from "@/types/ingestion";
 import type {
   Channel,
@@ -550,6 +551,37 @@ export async function uploadTrafficSourceCsv(
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as TrafficSourceResult;
+}
+
+// X(旧Twitter)日別CSVの投入（要ログイン）。file を multipart で送る（date は中身から）。
+export async function uploadXCsv(file: File): Promise<XCsvResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const form = new FormData();
+  form.append("file", file);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/ingestion/x-csv", API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as XCsvResult;
 }
 
 // Studio自社同接CSV: プレビュー（計算＋動画候補。保存しない・要ログイン）。

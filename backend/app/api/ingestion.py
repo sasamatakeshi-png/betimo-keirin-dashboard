@@ -24,10 +24,12 @@ from app.schemas.ingestion import (
     StudioCcuPreviewResult,
     TrafficSourceResult,
     UploadResult,
+    XCsvResult,
 )
 from app.services.ccu_ingestion import ingest_ccu_xlsx
 from app.services.studio_ccu_ingestion import commit_studio_ccu, preview_studio_ccu
 from app.services.traffic_source_ingestion import ingest_traffic_source
+from app.services.x_ingestion import ingest_x_csv
 from app.services.ingestion import (
     INGEST_TYPES,
     SHORT_INGEST_TYPES,
@@ -150,6 +152,23 @@ async def upload_related_video(
 ) -> TrafficSourceResult:
     """関連動画CSV（関連動画別）を channel_traffic_sources へ upsert する。"""
     return await _upload_traffic(file, year_month, "related_video", db)
+
+
+@router.post(
+    "/x-csv",
+    response_model=XCsvResult,
+    dependencies=[Depends(get_current_auth)],
+)
+async def upload_x_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> XCsvResult:
+    """X(旧Twitter)日別CSVを x_daily_metrics へ upsert する（date 一意・置換）。"""
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty file")
+    result = ingest_x_csv(db, content, file.filename)
+    return XCsvResult(**result)
 
 
 @router.post(

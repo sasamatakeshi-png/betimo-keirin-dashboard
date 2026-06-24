@@ -25,6 +25,15 @@ export interface TrafficSourceResult {
   log_id: string;
 }
 
+// POST /api/ingestion/x-csv のレスポンス（X 日別CSV。date 一意で upsert）
+export interface XCsvResult {
+  rows_written: number;
+  skipped: number;
+  date_from: string | null; // 'YYYY-MM-DD'
+  date_to: string | null;
+  log_id: string;
+}
+
 // POST /api/ingestion/monthly のレスポンス（schemas/ingestion.py MonthlyUploadResult と対応）
 export interface MonthlyUploadResult {
   year_month: string; // 'YYYY-MM'

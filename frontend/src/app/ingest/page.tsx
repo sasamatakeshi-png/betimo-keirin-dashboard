@@ -21,6 +21,7 @@ import {
   uploadMonthlyVideoCsv,
   uploadShortCsv,
   uploadTrafficSourceCsv,
+  uploadXCsv,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
@@ -48,6 +49,7 @@ import type {
   TrafficSourceKind,
   TrafficSourceResult,
   UploadResult,
+  XCsvResult,
 } from "@/types/ingestion";
 
 const TYPE_OPTIONS: { value: IngestType; label: string; hint: string }[] = [
@@ -242,6 +244,14 @@ export default function IngestPage() {
   const [trafficResult, setTrafficResult] = useState<TrafficSourceResult | null>(null);
   const [trafficResultFile, setTrafficResultFile] = useState<string | null>(null);
   const [trafficError, setTrafficError] = useState<string | null>(null);
+
+  // XデータCSV（日別。date 一意で upsert・他とは独立）
+  const [xFile, setXFile] = useState<File | null>(null);
+  const [xDragOver, setXDragOver] = useState(false);
+  const [xUploading, setXUploading] = useState(false);
+  const [xResult, setXResult] = useState<XCsvResult | null>(null);
+  const [xResultFile, setXResultFile] = useState<string | null>(null);
+  const [xError, setXError] = useState<string | null>(null);
 
   // 同時接続数xlsx（複数ファイルをまとめて順次投入。他の投入口とは独立）
   const [concRows, setConcRows] = useState<ConcRow[]>([]);
@@ -475,6 +485,34 @@ export default function IngestPage() {
       setTrafficError(e instanceof Error ? e.message : "アップロードに失敗しました");
     } finally {
       setTrafficUploading(false);
+    }
+  }
+
+  // --- XデータCSV ---
+  function pickXFile(f: File | undefined | null) {
+    if (f) {
+      setXFile(f);
+      setXResult(null);
+      setXError(null);
+    }
+  }
+
+  async function handleUploadX() {
+    if (!xFile || !canEdit || xUploading) return;
+    setXUploading(true);
+    setXError(null);
+    setXResult(null);
+    try {
+      const r = await uploadXCsv(xFile);
+      setXResult(r);
+      setXResultFile(xFile.name);
+      setXFile(null);
+      setLogsLoading(true);
+      void loadLogs();
+    } catch (e) {
+      setXError(e instanceof Error ? e.message : "アップロードに失敗しました");
+    } finally {
+      setXUploading(false);
     }
   }
 
@@ -1501,6 +1539,104 @@ export default function IngestPage() {
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <span>投入(置換) {formatNumber(trafficResult.rows_written)} 行</span>
                 <span>スキップ {formatNumber(trafficResult.skipped)} 行</span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* XデータCSVアップロード（日別。date 一意で upsert） */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">XデータCSVアップロード</CardTitle>
+          {authRequired === true && !canEdit && (
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            X（旧Twitter）アナリティクスの日別CSV（1行＝1日）を投入します。インプレッション/いいね/エンゲージメント/フォロー増減等を日付一意で保存し、同じ日付を入れ直すと最新値で置換します。対象月の指定は不要（日付はCSVの Date 列から）。
+          </p>
+
+          {/* ファイル選択 */}
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setXDragOver(true);
+            }}
+            onDragLeave={() => setXDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setXDragOver(false);
+              pickXFile(e.dataTransfer.files?.[0]);
+            }}
+            className={`flex h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm ${
+              xDragOver ? "border-blue-400 bg-blue-50/50" : "border-muted-foreground/25 hover:bg-muted/30"
+            }`}
+          >
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                pickXFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            {xFile ? (
+              <>
+                <span className="font-medium">{xFile.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {formatNumber(xFile.size)} バイト — クリックで選び直し
+                </span>
+              </>
+            ) : (
+              <>
+                <span>XデータCSVをドロップ、またはクリックして選択</span>
+                <span className="text-xs text-muted-foreground">.csv（UTF-8 / Shift_JIS 両対応）</span>
+              </>
+            )}
+          </label>
+          <p className="text-[11px] text-muted-foreground">{NAMING_RULES.x}</p>
+
+          {/* 実行 */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleUploadX()}
+              disabled={!xFile || !canEdit || xUploading}
+              className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {xUploading ? "投入中…" : "X取り込み実行"}
+            </button>
+            {!canEdit && probed && (
+              <span className="text-xs text-muted-foreground">投入にはログインが必要です</span>
+            )}
+          </div>
+
+          {/* 結果 / エラー */}
+          {xError && (
+            <div className="rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600">
+              {xError}
+            </div>
+          )}
+          {xResult && (
+            <div className="rounded-md border border-green-200 bg-green-50/50 p-3 text-sm">
+              <div className="font-medium text-green-800">
+                取り込み完了{xResultFile ? `: ${xResultFile}` : ""}
+                {xResult.date_from && xResult.date_to
+                  ? `（${xResult.date_from} 〜 ${xResult.date_to}）`
+                  : ""}
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>投入(置換) {formatNumber(xResult.rows_written)} 日</span>
+                <span>スキップ {formatNumber(xResult.skipped)} 行</span>
               </div>
             </div>
           )}
