@@ -12,6 +12,7 @@ import {
   ApiError,
   commitStudioCcu,
   deleteMonthlyData,
+  enrichVideos,
   getDeletePreview,
   getIngestionLogs,
   previewStudioCcu,
@@ -38,6 +39,7 @@ import type {
   DeletableKind,
   DeletePreviewResult,
   DeleteResult,
+  EnrichResult,
   IngestionLog,
   IngestType,
   MonthlyKind,
@@ -244,6 +246,11 @@ export default function IngestPage() {
   const [trafficResult, setTrafficResult] = useState<TrafficSourceResult | null>(null);
   const [trafficResultFile, setTrafficResultFile] = useState<string | null>(null);
   const [trafficError, setTrafficError] = useState<string | null>(null);
+
+  // 番組情報エンリッチ（cast空の番組を概要欄APIで補完・他とは独立）
+  const [enrichBusy, setEnrichBusy] = useState(false);
+  const [enrichResult, setEnrichResult] = useState<EnrichResult | null>(null);
+  const [enrichError, setEnrichError] = useState<string | null>(null);
 
   // XデータCSV（日別。date 一意で upsert・他とは独立）
   const [xFile, setXFile] = useState<File | null>(null);
@@ -485,6 +492,24 @@ export default function IngestPage() {
       setTrafficError(e instanceof Error ? e.message : "アップロードに失敗しました");
     } finally {
       setTrafficUploading(false);
+    }
+  }
+
+  // --- 番組情報エンリッチ ---
+  async function handleEnrich() {
+    if (!canEdit || enrichBusy) return;
+    setEnrichBusy(true);
+    setEnrichError(null);
+    setEnrichResult(null);
+    try {
+      const r = await enrichVideos();
+      setEnrichResult(r);
+      setLogsLoading(true);
+      void loadLogs();
+    } catch (e) {
+      setEnrichError(e instanceof Error ? e.message : "エンリッチに失敗しました");
+    } finally {
+      setEnrichBusy(false);
     }
   }
 
@@ -1539,6 +1564,65 @@ export default function IngestPage() {
               <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
                 <span>投入(置換) {formatNumber(trafficResult.rows_written)} 行</span>
                 <span>スキップ {formatNumber(trafficResult.skipped)} 行</span>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 番組情報エンリッチ（cast空の番組を概要欄APIで補完） */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">番組情報エンリッチ</CardTitle>
+          {authRequired === true && !canEdit && (
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            出演者(cast)が未登録の自社番組について、YouTubeの概要欄から
+            <strong>出演者・番組種別・グレード</strong>を自動補完します。既に値があるフィールドは上書きしません。
+            同接取り込みで作られた新番組(出演者が空)の整備に使えます。
+          </p>
+
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleEnrich()}
+              disabled={!canEdit || enrichBusy}
+              className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {enrichBusy ? "補完中…" : "番組情報を補完する"}
+            </button>
+            {!canEdit && probed && (
+              <span className="text-xs text-muted-foreground">実行にはログインが必要です</span>
+            )}
+          </div>
+
+          {enrichError && (
+            <div className="rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600">
+              {enrichError}
+            </div>
+          )}
+          {enrichResult && (
+            <div className="rounded-md border border-green-200 bg-green-50/50 p-3 text-sm">
+              <div className="font-medium text-green-800">
+                補完完了（対象 {formatNumber(enrichResult.targets)} 本 / API {formatNumber(enrichResult.api_calls)} 回）
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>出演者 {formatNumber(enrichResult.cast_updated)} 本</span>
+                <span>番組種別 {formatNumber(enrichResult.program_type_updated)} 本</span>
+                <span>グレード {formatNumber(enrichResult.grade_updated)} 本</span>
+                <span>出演者なし {formatNumber(enrichResult.cast_skipped)} 本</span>
+                <span className={enrichResult.unmatched > 0 ? "text-amber-700" : ""}>
+                  API未取得 {formatNumber(enrichResult.unmatched)} 本
+                </span>
               </div>
             </div>
           )}

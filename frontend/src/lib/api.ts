@@ -35,6 +35,7 @@ import type {
   ShortIngestType,
   StudioCcuCommitResult,
   StudioCcuPreviewResult,
+  EnrichResult,
   TrafficSourceKind,
   TrafficSourceResult,
   UploadResult,
@@ -582,6 +583,34 @@ export async function uploadXCsv(file: File): Promise<XCsvResult> {
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as XCsvResult;
+}
+
+// 番組情報エンリッチ（cast空の自社動画を概要欄APIで補完・要ログイン）。
+export async function enrichVideos(): Promise<EnrichResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  let res: Response;
+  try {
+    res = await fetch(new URL("/api/videos/enrich", API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as EnrichResult;
 }
 
 // Studio自社同接CSV: プレビュー（計算＋動画候補。保存しない・要ログイン）。

@@ -34,6 +34,19 @@ export interface XCsvResult {
   log_id: string;
 }
 
+// POST /api/videos/enrich のレスポンス（cast空の番組を概要欄APIで補完）
+export interface EnrichResult {
+  targets: number;
+  fetched: number;
+  api_calls: number;
+  cast_updated: number;
+  program_type_updated: number;
+  grade_updated: number;
+  cast_skipped: number;
+  unmatched: number;
+  log_id: string;
+}
+
 // POST /api/ingestion/monthly のレスポンス（schemas/ingestion.py MonthlyUploadResult と対応）
 export interface MonthlyUploadResult {
   year_month: string; // 'YYYY-MM'

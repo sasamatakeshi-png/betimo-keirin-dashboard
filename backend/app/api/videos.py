@@ -18,11 +18,13 @@ from app.schemas.video import (
     CompareMetrics,
     CompareResponse,
     CompareVideo,
+    EnrichResult,
     TimeseriesOverlay,
     TimeseriesOverlayPoint,
     VideoOut,
     VideoUpdate,
 )
+from app.services.video_enrich import enrich_videos
 
 router = APIRouter(prefix="/videos", tags=["videos"])
 
@@ -41,6 +43,25 @@ _COMPARE_METRIC_KEYS = [
     "avg_view_percentage",
     "repeater_ratio",
 ]
+
+
+@router.post(
+    "/enrich",
+    response_model=EnrichResult,
+    dependencies=[Depends(get_current_auth)],
+)
+def enrich(db: Session = Depends(get_db)) -> EnrichResult:
+    """cast空の自社動画を概要欄APIで補完する（出演者/番組種別/grade）。
+
+    既存値があるフィールドは上書きしない。YOUTUBE_API_KEY 未設定は 400。
+    """
+    try:
+        result = enrich_videos(db)
+    except ValueError as exc:  # APIキー未設定 / API失敗
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return EnrichResult(**result)
 
 
 def _day_start_utc(d: date) -> datetime:

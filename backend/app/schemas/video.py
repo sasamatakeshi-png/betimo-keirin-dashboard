@@ -8,6 +8,20 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
+class EnrichResult(BaseModel):
+    """番組情報エンリッチ(POST /videos/enrich)の結果。"""
+
+    targets: int  # cast空の対象動画数
+    fetched: int  # YouTube APIで概要欄を取得できた数
+    api_calls: int  # videos.list 呼び出し回数(50件/回)
+    cast_updated: int  # 出演者を補完した数
+    program_type_updated: int  # 番組種別を補完した数
+    grade_updated: int  # gradeを補完した数
+    cast_skipped: int  # 概要欄はあるが出演者抽出不可
+    unmatched: int  # API応答に無い(削除/非公開)
+    log_id: UUID
+
+
 class VideoOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
