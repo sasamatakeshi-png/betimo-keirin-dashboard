@@ -112,11 +112,48 @@ function ProgramTypeBadge({ type }: { type: string | null }) {
   );
 }
 
+// グレード → バッジ配色。G1=金 / G2=銀 / G3=銅 / F1=緑 / F2=水色。
+// NULL（未設定）はバッジを出さない（GradeBadge が null を返す）。
+const GRADE_BADGE: Record<string, string> = {
+  G1: "bg-amber-200 text-amber-900", // 金
+  G2: "bg-slate-200 text-slate-700", // 銀
+  G3: "bg-orange-200 text-orange-900", // 銅
+  F1: "bg-green-100 text-green-700", // 緑
+  F2: "bg-cyan-100 text-cyan-700", // 水色
+};
+
+// グレード表記ゆれ（全角・GⅢ 等）を G1/G3 形へ寄せる（DBは半角想定だが保険）。
+function canonicalGrade(grade: string): string {
+  return grade
+    .trim()
+    .normalize("NFKC")
+    .replace(/Ⅰ/g, "1")
+    .replace(/Ⅱ/g, "2")
+    .replace(/Ⅲ/g, "3");
+}
+
+function GradeBadge({ grade }: { grade: string | null }) {
+  if (!grade) return null; // NULL は表示なし
+  const key = canonicalGrade(grade);
+  const cls = GRADE_BADGE[key] ?? "bg-gray-100 text-gray-600";
+  return (
+    <span
+      className={`inline-block rounded px-1.5 py-0.5 text-[10px] font-bold ${cls}`}
+    >
+      {key}
+    </span>
+  );
+}
+
+// グレード絞り込みの選択肢（固定）。
+const GRADE_OPTIONS = ["G1", "G2", "G3", "F1", "F2"] as const;
+
 export default function ProgramComparisonPage() {
   // フィルタ
   const [race, setRace] = useState("");
   const [programType, setProgramType] = useState("");
   const [yearMonth, setYearMonth] = useState("");
+  const [grade, setGrade] = useState(""); // グレード絞り込み（空=すべて。クライアント側）
 
   // 候補・選択肢
   const [candidates, setCandidates] = useState<ProgramCandidate[]>([]);
@@ -199,6 +236,16 @@ export default function ProgramComparisonPage() {
   const candidateById = useMemo(
     () => new Map(candidates.map((c) => [c.video_id, c])),
     [candidates],
+  );
+
+  // グレード絞り込みはクライアント側（候補はフィルタで縮まないが選択肢は固定）。
+  // canonicalGrade で表記ゆれを吸収して比較する。
+  const visibleCandidates = useMemo(
+    () =>
+      grade
+        ? candidates.filter((c) => c.grade && canonicalGrade(c.grade) === grade)
+        : candidates,
+    [candidates, grade],
   );
 
   // 選択操作
@@ -322,6 +369,7 @@ export default function ProgramComparisonPage() {
                                 {isBase ? "基準" : `比較${columnIds.indexOf(id)}`}
                               </span>
                               <ProgramTypeBadge type={d.program_type} />
+                              <GradeBadge grade={d.grade} />
                             </div>
                             <div
                               className="max-w-[220px] truncate text-xs font-semibold"
@@ -439,13 +487,29 @@ export default function ProgramComparisonPage() {
                 ))}
               </select>
             </label>
-            {(race || programType || yearMonth) && (
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              グレード
+              <select
+                value={grade}
+                onChange={(e) => setGrade(e.target.value)}
+                className="w-28 rounded-md border px-2 py-1.5 text-sm text-foreground"
+              >
+                <option value="">すべて</option>
+                {GRADE_OPTIONS.map((g) => (
+                  <option key={g} value={g}>
+                    {g}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {(race || programType || yearMonth || grade) && (
               <button
                 type="button"
                 onClick={() => {
                   setRace("");
                   setProgramType("");
                   setYearMonth("");
+                  setGrade("");
                 }}
                 className="rounded-md border px-3 py-1.5 text-xs text-muted-foreground hover:text-foreground"
               >
@@ -455,7 +519,7 @@ export default function ProgramComparisonPage() {
           </div>
 
           <div className="text-xs text-muted-foreground">
-            候補 {candidates.length} 本
+            候補 {visibleCandidates.length} 本
             {compareFull && (
               <span className="ml-2 text-amber-600">
                 比較相手は最大 {COMPARE_MAX} 本です（解除すると追加できます）
@@ -467,12 +531,12 @@ export default function ProgramComparisonPage() {
           <div className="max-h-[420px] overflow-y-auto rounded-md border">
             {loadingCandidates && candidates.length === 0 ? (
               <div className="p-6 text-center text-sm text-muted-foreground">読み込み中…</div>
-            ) : candidates.length === 0 ? (
+            ) : visibleCandidates.length === 0 ? (
               <div className="p-6 text-center text-sm text-muted-foreground">
                 該当する番組がありません
               </div>
             ) : (
-              candidates.map((c) => {
+              visibleCandidates.map((c) => {
                 const isBase = c.video_id === baseId;
                 const isCompare = compareIds.includes(c.video_id);
                 return (
@@ -484,6 +548,7 @@ export default function ProgramComparisonPage() {
                       {formatDate(c.published_at)}
                     </span>
                     <ProgramTypeBadge type={c.program_type} />
+                    <GradeBadge grade={c.grade} />
                     <span className="min-w-0 flex-1 truncate" title={c.title}>
                       {c.title}
                     </span>

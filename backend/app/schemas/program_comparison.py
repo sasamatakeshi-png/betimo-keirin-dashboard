@@ -20,6 +20,7 @@ class ProgramCandidate(BaseModel):
     youtube_video_id: str | None
     title: str
     program_type: str | None
+    grade: str | None = None  # G1/G2/G3/F1/F2。未設定は null。
     published_at: datetime | None
     event_name: str | None
     cast_members: list[str]
@@ -63,6 +64,7 @@ class ProgramDetail(BaseModel):
     youtube_video_id: str | None
     title: str
     program_type: str | None
+    grade: str | None = None  # G1/G2/G3/F1/F2。未設定は null。
     published_at: datetime | None
     event_name: str | None
     cast_members: list[str]

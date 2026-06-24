@@ -7,6 +7,7 @@ export interface ProgramCandidate {
   youtube_video_id: string | null;
   title: string;
   program_type: string | null;
+  grade: string | null; // G1/G2/G3/F1/F2。未設定は null。
   published_at: string | null;
   event_name: string | null;
   cast_members: string[];
@@ -41,6 +42,7 @@ export interface ProgramDetail {
   youtube_video_id: string | null;
   title: string;
   program_type: string | null;
+  grade: string | null; // G1/G2/G3/F1/F2。未設定は null。
   published_at: string | null;
   event_name: string | null;
   cast_members: string[];

@@ -56,6 +56,7 @@ def list_races(db: Session = Depends(get_db)) -> list[RaceGroup]:
             Video.id.label("video_id"),
             Video.youtube_video_id.label("youtube_video_id"),
             Video.title.label("title"),
+            Video.grade.label("grade"),
             Video.is_competitor.label("is_competitor"),
             Channel.is_own.label("is_own"),
             Channel.name.label("channel_name"),
@@ -75,6 +76,7 @@ def list_races(db: Session = Depends(get_db)) -> list[RaceGroup]:
             Video.id,
             Video.youtube_video_id,
             Video.title,
+            Video.grade,
             Video.is_competitor,
             Channel.is_own,
             Channel.name,
@@ -99,7 +101,14 @@ def list_races(db: Session = Depends(get_db)) -> list[RaceGroup]:
         own = next((m for m in members if m.is_own), None)
         rep = own or members[0]
         race_name = rep.event_name or _race_name_from_title(rep.title)
-        label = f"{date_str} {race_name}" if race_name else date_str
+        # グレードは自社(Betimo)動画の videos.grade を使用（NULL なら付けない）。
+        grade = own.grade if own else None
+        label_parts = [date_str]
+        if race_name:
+            label_parts.append(race_name)
+        if grade:
+            label_parts.append(grade)
+        label = " ".join(label_parts)
 
         # 表示順: 自社を先頭、その後 競合をチャンネル名順
         members_sorted = sorted(members, key=lambda m: (m.is_competitor, m.channel_name))
