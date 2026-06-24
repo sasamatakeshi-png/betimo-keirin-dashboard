@@ -1,6 +1,10 @@
 // 取り込み系の型（バックエンド schemas/ingestion.py と対応）
 
-export type IngestType = "zenkikan_csv" | "90d_csv";
+export type IngestType =
+  | "zenkikan_csv"
+  | "90d_csv"
+  | "live_views_csv"
+  | "archive_views_csv";
 
 // ショート専用CSVの種別（全期間 / 90日。列構成は通常と別物）
 export type ShortIngestType = "short_zenkikan_csv" | "short_90d_csv";

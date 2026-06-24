@@ -10,7 +10,7 @@ import type {
 
 // 各取り込み口の命名ルール（画面に小さく表示する）。
 export const NAMING_RULES = {
-  normal: "推奨: 種別が分かる名前（例: 全期間_チャンネル.csv / 90日_チャンネル.csv）。「全期間」「90日」で種別を自動判別。",
+  normal: "推奨: 種別が分かる名前（例: 全期間_チャンネル.csv / 90日_チャンネル.csv / 全期間データ（ライブ視聴）.csv / 全期間データ（アーカイブ視聴）.csv）。種別を自動判別。",
   short: "推奨: ショート全期間.csv / ショート90日.csv。「全期間」「90日」で種別を自動判別。",
   monthly: "推奨: 数値_全体_2026-05.csv / 性別年齢_全体_2026-05.csv。種別・セグメント・月を自動判別。",
   video: "推奨: 動画別_2026-05.csv。ファイル名の YYYY-MM で対象月を自動判別。",
@@ -18,8 +18,11 @@ export const NAMING_RULES = {
     "同時接続数xlsx（1ファイル=1レース1日）。「設定」シートの計測開始日時と「データ」シートの時系列を読み、Betimo＋競合3社（ぺーちゃんねる/オッズパーク/楽天Kドリームス）のみ取り込みます。複数ファイルをまとめて投入できます。",
 } as const;
 
-// 通常CSVの種別を推測。「90日」→90d、「全期間」→zenkikan。判別不能は null。
+// 通常CSVの種別を推測。判別不能は null。
+// ライブ/アーカイブ視聴は名前に「全期間」を含むため、90日/全期間より先に判定する。
 export function guessNormalType(name: string): IngestType | null {
+  if (/アーカイブ視聴|archive/i.test(name)) return "archive_views_csv";
+  if (/ライブ視聴|live[\s_-]?view/i.test(name)) return "live_views_csv";
   if (/90\s*日|90d|90day/i.test(name)) return "90d_csv";
   if (/全期間|zenki|all[\s_-]?time/i.test(name)) return "zenkikan_csv";
   return null;

@@ -49,6 +49,8 @@ import type {
 const TYPE_OPTIONS: { value: IngestType; label: string; hint: string }[] = [
   { value: "zenkikan_csv", label: "全期間CSV", hint: "imp / 再生数 / 登録数 / 平均視聴時間 / 平均再生率" },
   { value: "90d_csv", label: "90日CSV", hint: "UU数 / 新規・リピーター / リピーター比率" },
+  { value: "live_views_csv", label: "ライブ視聴CSV", hint: "「全期間データ（ライブ視聴）.csv」の視聴回数 → ライブ視聴(live_views)" },
+  { value: "archive_views_csv", label: "アーカイブ視聴CSV", hint: "「全期間データ（アーカイブ視聴）.csv」の視聴回数 → アーカイブ視聴(archive_views)" },
 ];
 
 const SHORT_TYPE_OPTIONS: { value: ShortIngestType; label: string; hint: string }[] = [

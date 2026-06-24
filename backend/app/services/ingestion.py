@@ -17,9 +17,15 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from app.models import Channel, IngestionLog, MetricValue, Video
-from app.services.parsers import parse_90d_csv, parse_short_csv, parse_zenkikan_csv
+from app.services.parsers import (
+    parse_90d_csv,
+    parse_archive_views_csv,
+    parse_live_views_csv,
+    parse_short_csv,
+    parse_zenkikan_csv,
+)
 
-INGEST_TYPES = {"zenkikan_csv", "90d_csv"}
+INGEST_TYPES = {"zenkikan_csv", "90d_csv", "live_views_csv", "archive_views_csv"}
 
 # ショート用 CSV の種別（全期間/90日。列構成は同一で、空欄の有無のみ異なる）。
 SHORT_INGEST_TYPES = {"short_zenkikan_csv", "short_90d_csv"}
@@ -58,6 +64,10 @@ def ingest_csv(db: Session, content: bytes, filename: str | None, ingest_type: s
 
     if ingest_type == "zenkikan_csv":
         records = parse_zenkikan_csv(content)
+    elif ingest_type == "live_views_csv":
+        records = parse_live_views_csv(content)
+    elif ingest_type == "archive_views_csv":
+        records = parse_archive_views_csv(content)
     else:  # 90d_csv
         records = parse_90d_csv(content)
         # repeater_ratio が無ければ repeat/unique で算出（unique>0 のみ）

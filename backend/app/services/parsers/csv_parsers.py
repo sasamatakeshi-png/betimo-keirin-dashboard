@@ -117,6 +117,30 @@ def parse_90d_csv(content: bytes) -> list[dict]:
     )
 
 
+def parse_live_views_csv(content: bytes) -> list[dict]:
+    """ライブ視聴CSV: 「視聴回数」列の値を live_views として取り込む。
+
+    アーカイブ視聴CSVと同一列構成のため、ファイル種別で metric_key を振り分ける。
+    除外語(率/平均/維持/時間)で 平均視聴率・平均視聴時間・総再生時間 の誤マッチを避ける。
+    """
+    return _parse(
+        content,
+        count_cols={"live_views": (["視聴回数", "再生数", "views"], ("率", "平均", "維持", "時間"))},
+        duration_cols={},
+        percent_cols={},
+    )
+
+
+def parse_archive_views_csv(content: bytes) -> list[dict]:
+    """アーカイブ視聴CSV: 「視聴回数」列の値を archive_views として取り込む。"""
+    return _parse(
+        content,
+        count_cols={"archive_views": (["視聴回数", "再生数", "views"], ("率", "平均", "維持", "時間"))},
+        duration_cols={},
+        percent_cols={},
+    )
+
+
 # ショート用 CSV（全期間 / 90日とも同一列構成）の列→指標マッピング。
 # 通常CSVと違い、video の新規作成に使う title / 公開時刻 / 長さ も抽出する。
 _SHORT_COUNT_COLS: dict[str, tuple[list[str], tuple[str, ...]]] = {

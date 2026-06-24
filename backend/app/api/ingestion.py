@@ -63,7 +63,10 @@ async def upload_csv(
     file: UploadFile = File(...),
     type: str = Form(
         ...,
-        description="zenkikan_csv | 90d_csv | short_zenkikan_csv | short_90d_csv",
+        description=(
+            "zenkikan_csv | 90d_csv | live_views_csv | archive_views_csv "
+            "| short_zenkikan_csv | short_90d_csv"
+        ),
     ),
     db: Session = Depends(get_db),
 ) -> UploadResult:

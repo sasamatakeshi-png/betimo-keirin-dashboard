@@ -1,5 +1,7 @@
 from app.services.parsers.csv_parsers import (
     parse_90d_csv,
+    parse_archive_views_csv,
+    parse_live_views_csv,
     parse_short_csv,
     parse_zenkikan_csv,
 )
@@ -14,6 +16,8 @@ from app.services.parsers.monthly_parsers import (
 __all__ = [
     "parse_zenkikan_csv",
     "parse_90d_csv",
+    "parse_live_views_csv",
+    "parse_archive_views_csv",
     "parse_short_csv",
     "parse_monthly_metrics_csv",
     "parse_monthly_demographics_csv",
