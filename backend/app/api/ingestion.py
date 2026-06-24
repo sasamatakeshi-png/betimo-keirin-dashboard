@@ -22,10 +22,12 @@ from app.schemas.ingestion import (
     MonthlyVideoUploadResult,
     StudioCcuCommitResult,
     StudioCcuPreviewResult,
+    TrafficSourceResult,
     UploadResult,
 )
 from app.services.ccu_ingestion import ingest_ccu_xlsx
 from app.services.studio_ccu_ingestion import commit_studio_ccu, preview_studio_ccu
+from app.services.traffic_source_ingestion import ingest_traffic_source
 from app.services.ingestion import (
     INGEST_TYPES,
     SHORT_INGEST_TYPES,
@@ -85,6 +87,69 @@ async def upload_csv(
     else:
         result = ingest_csv(db, content, file.filename, type)
     return UploadResult(**result)
+
+
+async def _upload_traffic(
+    file: UploadFile, year_month: str, source_type: str, db: Session
+) -> TrafficSourceResult:
+    """流入経路系CSV 3種の共通処理（year_month 検証 → upsert）。"""
+    if not _YEAR_MONTH_RE.match(year_month):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="year_month must be 'YYYY-MM'",
+        )
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="empty file")
+    try:
+        result = ingest_traffic_source(db, content, file.filename, year_month, source_type)
+    except ValueError as exc:  # CSV内容・source_type の問題
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
+    return TrafficSourceResult(**result)
+
+
+@router.post(
+    "/traffic-source",
+    response_model=TrafficSourceResult,
+    dependencies=[Depends(get_current_auth)],
+)
+async def upload_traffic_source(
+    file: UploadFile = File(...),
+    year_month: str = Form(..., description="対象月 'YYYY-MM'"),
+    db: Session = Depends(get_db),
+) -> TrafficSourceResult:
+    """流入経路CSV（大カテゴリ）を channel_traffic_sources へ upsert する。"""
+    return await _upload_traffic(file, year_month, "category", db)
+
+
+@router.post(
+    "/external-url",
+    response_model=TrafficSourceResult,
+    dependencies=[Depends(get_current_auth)],
+)
+async def upload_external_url(
+    file: UploadFile = File(...),
+    year_month: str = Form(..., description="対象月 'YYYY-MM'"),
+    db: Session = Depends(get_db),
+) -> TrafficSourceResult:
+    """外部流入CSV（外部URL別）を channel_traffic_sources へ upsert する。"""
+    return await _upload_traffic(file, year_month, "external_url", db)
+
+
+@router.post(
+    "/related-video",
+    response_model=TrafficSourceResult,
+    dependencies=[Depends(get_current_auth)],
+)
+async def upload_related_video(
+    file: UploadFile = File(...),
+    year_month: str = Form(..., description="対象月 'YYYY-MM'"),
+    db: Session = Depends(get_db),
+) -> TrafficSourceResult:
+    """関連動画CSV（関連動画別）を channel_traffic_sources へ upsert する。"""
+    return await _upload_traffic(file, year_month, "related_video", db)
 
 
 @router.post(

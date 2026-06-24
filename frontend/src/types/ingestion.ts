@@ -13,6 +13,18 @@ export type ShortIngestType = "short_zenkikan_csv" | "short_90d_csv";
 export type MonthlySegment = "all" | "live" | "short";
 export type MonthlyKind = "metrics" | "demographics";
 
+// 流入経路系CSVの種別（API エンドポイントに対応）
+export type TrafficSourceKind = "category" | "external_url" | "related_video";
+
+// POST /api/ingestion/{traffic-source|external-url|related-video} のレスポンス
+export interface TrafficSourceResult {
+  year_month: string; // 'YYYY-MM'
+  source_type: TrafficSourceKind;
+  rows_written: number;
+  skipped: number;
+  log_id: string;
+}
+
 // POST /api/ingestion/monthly のレスポンス（schemas/ingestion.py MonthlyUploadResult と対応）
 export interface MonthlyUploadResult {
   year_month: string; // 'YYYY-MM'

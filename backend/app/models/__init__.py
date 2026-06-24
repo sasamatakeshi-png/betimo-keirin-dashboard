@@ -3,6 +3,7 @@ from app.models.entities import (
     AnalysisTemplate,
     Channel,
     ChannelStatsDaily,
+    ChannelTrafficSource,
     Event,
     IngestionLog,
     LatestMetricValue,
@@ -18,6 +19,7 @@ from app.models.entities import (
 __all__ = [
     "Channel",
     "ChannelStatsDaily",
+    "ChannelTrafficSource",
     "Event",
     "Video",
     "MetricDefinition",

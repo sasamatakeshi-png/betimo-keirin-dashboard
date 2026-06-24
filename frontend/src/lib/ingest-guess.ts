@@ -6,6 +6,7 @@ import type {
   MonthlyKind,
   MonthlySegment,
   ShortIngestType,
+  TrafficSourceKind,
 } from "@/types/ingestion";
 
 // 各取り込み口の命名ルール（画面に小さく表示する）。
@@ -16,7 +17,17 @@ export const NAMING_RULES = {
   video: "推奨: 動画別_2026-05.csv。ファイル名の YYYY-MM で対象月を自動判別。",
   concurrent:
     "同時接続数xlsx（1ファイル=1レース1日）。「設定」シートの計測開始日時と「データ」シートの時系列を読み、Betimo＋競合3社（ぺーちゃんねる/オッズパーク/楽天Kドリームス）のみ取り込みます。複数ファイルをまとめて投入できます。",
+  traffic:
+    "推奨: 6月流入経路.csv / 6月外部流入.csv / 6月関連動画.csv。種別はファイル名から自動判別、対象月はファイル名の「N月」で当年の月を自動選択（年は対象月セレクタで確定）。",
 } as const;
+
+// 流入経路系CSVの種別を推測。「関連動画」「外部」「流入経路」で判別。判別不能は null。
+export function guessTrafficKind(name: string): TrafficSourceKind | null {
+  if (/関連動画/.test(name)) return "related_video";
+  if (/外部流入|外部/.test(name)) return "external_url";
+  if (/流入経路|トラフィック/.test(name)) return "category";
+  return null;
+}
 
 // 通常CSVの種別を推測。判別不能は null。
 // ライブ/アーカイブ視聴は名前に「全期間」を含むため、90日/全期間より先に判定する。

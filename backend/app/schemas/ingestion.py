@@ -41,6 +41,16 @@ class MonthlyVideoUploadResult(BaseModel):
     log_id: UUID
 
 
+class TrafficSourceResult(BaseModel):
+    """流入経路系CSV（流入経路/外部流入/関連動画）取り込み結果。"""
+
+    year_month: str
+    source_type: str  # category | external_url | related_video
+    rows_written: int  # upsert した行数
+    skipped: int  # source_key 空などでスキップした行数
+    log_id: UUID
+
+
 class ConcurrentUploadResult(BaseModel):
     """同接xlsx（1ファイル=1レース1日）取り込み結果。"""
 

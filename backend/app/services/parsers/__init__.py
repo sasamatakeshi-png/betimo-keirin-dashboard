@@ -12,6 +12,11 @@ from app.services.parsers.monthly_parsers import (
     parse_monthly_metrics_csv,
     parse_monthly_video_csv,
 )
+from app.services.parsers.traffic_source_parsers import (
+    parse_external_url_csv,
+    parse_related_video_csv,
+    parse_traffic_source_csv,
+)
 
 __all__ = [
     "parse_zenkikan_csv",
@@ -22,6 +27,9 @@ __all__ = [
     "parse_monthly_metrics_csv",
     "parse_monthly_demographics_csv",
     "parse_monthly_video_csv",
+    "parse_traffic_source_csv",
+    "parse_external_url_csv",
+    "parse_related_video_csv",
     "map_age_band",
     "map_gender",
 ]

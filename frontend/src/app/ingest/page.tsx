@@ -20,6 +20,7 @@ import {
   uploadMonthlyCsv,
   uploadMonthlyVideoCsv,
   uploadShortCsv,
+  uploadTrafficSourceCsv,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
 import { formatDate, formatDateTime, formatNumber } from "@/lib/format";
@@ -28,6 +29,7 @@ import {
   guessMonthly,
   guessNormalType,
   guessShortType,
+  guessTrafficKind,
   guessYearMonth,
 } from "@/lib/ingest-guess";
 import type {
@@ -43,6 +45,8 @@ import type {
   ShortIngestType,
   StudioCcuCommitResult,
   StudioCcuPreviewResult,
+  TrafficSourceKind,
+  TrafficSourceResult,
   UploadResult,
 } from "@/types/ingestion";
 
@@ -56,6 +60,13 @@ const TYPE_OPTIONS: { value: IngestType; label: string; hint: string }[] = [
 const SHORT_TYPE_OPTIONS: { value: ShortIngestType; label: string; hint: string }[] = [
   { value: "short_zenkikan_csv", label: "ショート全期間CSV", hint: "未登録IDは新規ショートとして作成。新規/リピーターは空欄" },
   { value: "short_90d_csv", label: "ショート90日CSV", hint: "未登録IDは新規ショートとして作成。UU/新規/リピーターあり" },
+];
+
+// 流入経路系CSV（チャンネル全体の流入元。対象月 × source_type で upsert）
+const TRAFFIC_KIND_OPTIONS: { value: TrafficSourceKind; label: string; hint: string }[] = [
+  { value: "category", label: "流入経路CSV", hint: "大カテゴリ別（ブラウジング機能/YouTube検索/関連動画/外部 等）" },
+  { value: "external_url", label: "外部流入CSV", hint: "外部URL別（Google Search/X/betimo.jp 等）" },
+  { value: "related_video", label: "関連動画CSV", hint: "関連動画別（YT_RELATED.動画ID → タイトル）" },
 ];
 
 const STATUS_BADGE: Record<string, string> = {
@@ -221,6 +232,16 @@ export default function IngestPage() {
   const [videoResult, setVideoResult] = useState<MonthlyVideoUploadResult | null>(null);
   const [videoResultFile, setVideoResultFile] = useState<string | null>(null);
   const [videoError, setVideoError] = useState<string | null>(null);
+
+  // 流入経路系CSV（流入経路/外部流入/関連動画。対象月セレクタ付き・他とは独立）
+  const [trafficKind, setTrafficKind] = useState<TrafficSourceKind>("category");
+  const [trafficYM, setTrafficYM] = useState<string>(monthlyDefaultYM);
+  const [trafficFile, setTrafficFile] = useState<File | null>(null);
+  const [trafficDragOver, setTrafficDragOver] = useState(false);
+  const [trafficUploading, setTrafficUploading] = useState(false);
+  const [trafficResult, setTrafficResult] = useState<TrafficSourceResult | null>(null);
+  const [trafficResultFile, setTrafficResultFile] = useState<string | null>(null);
+  const [trafficError, setTrafficError] = useState<string | null>(null);
 
   // 同時接続数xlsx（複数ファイルをまとめて順次投入。他の投入口とは独立）
   const [concRows, setConcRows] = useState<ConcRow[]>([]);
@@ -409,6 +430,51 @@ export default function IngestPage() {
       // ② 自動判別: ファイル名の月を対象月にセット。
       const guessedYM = guessYearMonth(f.name, monthOptions.map((o) => o.value));
       if (guessedYM) setVideoYearMonth(guessedYM);
+    }
+  }
+
+  // --- 流入経路系CSV ---
+  function pickTrafficFile(f: File | undefined | null) {
+    if (f) {
+      setTrafficFile(f);
+      setTrafficResult(null);
+      setTrafficError(null);
+      // ② 自動判別: 種別（流入経路/外部流入/関連動画）と対象月をファイル名から。
+      const guessedKind = guessTrafficKind(f.name);
+      if (guessedKind) setTrafficKind(guessedKind);
+      const guessedYM = guessYearMonth(f.name, monthOptions.map((o) => o.value));
+      if (guessedYM) setTrafficYM(guessedYM);
+    }
+  }
+
+  async function handleUploadTraffic() {
+    if (!trafficFile || !trafficYM || !canEdit || trafficUploading) return;
+    // ① 不一致警告: ファイル名から種別を推測でき、選択中と食い違うなら確認。
+    const guessed = guessTrafficKind(trafficFile.name);
+    if (guessed && guessed !== trafficKind) {
+      const gl = TRAFFIC_KIND_OPTIONS.find((o) => o.value === guessed)?.label ?? guessed;
+      const cl = TRAFFIC_KIND_OPTIONS.find((o) => o.value === trafficKind)?.label ?? trafficKind;
+      if (
+        !window.confirm(
+          `ファイル名は「${gl}」のようですが、種別は「${cl}」が選ばれています。続行しますか？`,
+        )
+      )
+        return;
+    }
+    setTrafficUploading(true);
+    setTrafficError(null);
+    setTrafficResult(null);
+    try {
+      const r = await uploadTrafficSourceCsv(trafficFile, trafficYM, trafficKind);
+      setTrafficResult(r);
+      setTrafficResultFile(trafficFile.name);
+      setTrafficFile(null);
+      setLogsLoading(true);
+      void loadLogs();
+    } catch (e) {
+      setTrafficError(e instanceof Error ? e.message : "アップロードに失敗しました");
+    } finally {
+      setTrafficUploading(false);
     }
   }
 
@@ -1291,6 +1357,150 @@ export default function IngestPage() {
                 </span>
                 <span>スキップ(合計行/ID空) {formatNumber(videoResult.skipped)} 行</span>
                 {videoResult.replaced && <span>（同月同動画は置換）</span>}
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* 流入経路系CSVアップロード（チャンネル全体の流入元。対象月×種別で upsert） */}
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle className="text-base">流入経路CSVアップロード</CardTitle>
+          {authRequired === true && !canEdit && (
+            <button
+              type="button"
+              onClick={() => setLoginOpen(true)}
+              className="rounded-md bg-blue-600 px-3 py-1 text-xs text-white hover:bg-blue-700"
+            >
+              ログイン
+            </button>
+          )}
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            チャンネル全体のトラフィックソース（流入経路/外部流入/関連動画）を対象月ごとに投入します。動画別ではなくチャンネル集計です。同じ月・同じ種別・同じソースを入れ直すと最新値で置換されます。
+          </p>
+
+          {/* 種別選択 */}
+          <div className="flex flex-wrap gap-3">
+            {TRAFFIC_KIND_OPTIONS.map((opt) => (
+              <label
+                key={opt.value}
+                className={`flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm ${
+                  trafficKind === opt.value ? "border-blue-500 bg-blue-50/50" : "hover:bg-muted/40"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="traffic-kind"
+                  checked={trafficKind === opt.value}
+                  onChange={() => setTrafficKind(opt.value)}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="font-medium">{opt.label}</span>
+                  <span className="block text-xs text-muted-foreground">{opt.hint}</span>
+                </span>
+              </label>
+            ))}
+          </div>
+
+          {/* 対象月 */}
+          <div className="flex items-center gap-2">
+            <label className="text-sm text-muted-foreground" htmlFor="traffic-month">
+              対象月
+            </label>
+            <select
+              id="traffic-month"
+              value={trafficYM}
+              onChange={(e) => setTrafficYM(e.target.value)}
+              disabled={trafficUploading}
+              className="rounded-md border bg-background px-2 py-1 text-sm disabled:opacity-50"
+            >
+              {monthOptions.length === 0 && <option value="">—</option>}
+              {monthOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* ファイル選択 */}
+          <label
+            onDragOver={(e) => {
+              e.preventDefault();
+              setTrafficDragOver(true);
+            }}
+            onDragLeave={() => setTrafficDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setTrafficDragOver(false);
+              pickTrafficFile(e.dataTransfer.files?.[0]);
+            }}
+            className={`flex h-28 cursor-pointer flex-col items-center justify-center gap-1 rounded-lg border-2 border-dashed text-sm ${
+              trafficDragOver ? "border-blue-400 bg-blue-50/50" : "border-muted-foreground/25 hover:bg-muted/30"
+            }`}
+          >
+            <input
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                pickTrafficFile(e.target.files?.[0]);
+                e.target.value = "";
+              }}
+            />
+            {trafficFile ? (
+              <>
+                <span className="font-medium">{trafficFile.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {formatNumber(trafficFile.size)} バイト — クリックで選び直し
+                </span>
+              </>
+            ) : (
+              <>
+                <span>流入経路系CSVをドロップ、またはクリックして選択</span>
+                <span className="text-xs text-muted-foreground">.csv（UTF-8 / Shift_JIS 両対応）</span>
+              </>
+            )}
+          </label>
+          <p className="text-[11px] text-muted-foreground">{NAMING_RULES.traffic}</p>
+
+          {/* 実行 */}
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => void handleUploadTraffic()}
+              disabled={!trafficFile || !trafficYM || !canEdit || trafficUploading}
+              className="rounded-md bg-blue-600 px-4 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+            >
+              {trafficUploading ? "投入中…" : "流入経路取り込み実行"}
+            </button>
+            {!canEdit && probed && (
+              <span className="text-xs text-muted-foreground">投入にはログインが必要です</span>
+            )}
+          </div>
+
+          {/* 結果 / エラー */}
+          {trafficError && (
+            <div className="rounded-md border border-red-200 bg-red-50/50 p-3 text-sm text-red-600">
+              {trafficError}
+            </div>
+          )}
+          {trafficResult && (
+            <div className="rounded-md border border-green-200 bg-green-50/50 p-3 text-sm">
+              <div className="font-medium text-green-800">
+                取り込み完了{trafficResultFile ? `: ${trafficResultFile}` : ""}（
+                {formatYearMonthLabel(trafficResult.year_month)}・
+                {TRAFFIC_KIND_OPTIONS.find((o) => o.value === trafficResult.source_type)?.label ??
+                  trafficResult.source_type}
+                ）
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <span>投入(置換) {formatNumber(trafficResult.rows_written)} 行</span>
+                <span>スキップ {formatNumber(trafficResult.skipped)} 行</span>
               </div>
             </div>
           )}

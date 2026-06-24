@@ -35,6 +35,8 @@ import type {
   ShortIngestType,
   StudioCcuCommitResult,
   StudioCcuPreviewResult,
+  TrafficSourceKind,
+  TrafficSourceResult,
   UploadResult,
 } from "@/types/ingestion";
 import type {
@@ -505,6 +507,49 @@ export async function uploadConcurrentXlsx(
     throw new ApiError(res.status, detail);
   }
   return (await res.json()) as ConcurrentUploadResult;
+}
+
+// 流入経路系CSV（流入経路/外部流入/関連動画）の投入（要ログイン）。
+// kind でエンドポイントを振り分け、file / year_month('YYYY-MM') を multipart で送る。
+const TRAFFIC_ENDPOINT: Record<TrafficSourceKind, string> = {
+  category: "/api/ingestion/traffic-source",
+  external_url: "/api/ingestion/external-url",
+  related_video: "/api/ingestion/related-video",
+};
+
+export async function uploadTrafficSourceCsv(
+  file: File,
+  yearMonth: string,
+  kind: TrafficSourceKind,
+): Promise<TrafficSourceResult> {
+  const token = getToken();
+  const headers: Record<string, string> = { Accept: "application/json" };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const form = new FormData();
+  form.append("file", file);
+  form.append("year_month", yearMonth);
+
+  let res: Response;
+  try {
+    res = await fetch(new URL(TRAFFIC_ENDPOINT[kind], API_BASE_URL).toString(), {
+      method: "POST",
+      headers,
+      body: form,
+    });
+  } catch {
+    throw new ApiError(0, `APIサーバーに接続できません（${API_BASE_URL}）`);
+  }
+  if (!res.ok) {
+    let detail = `${res.status} ${res.statusText}`;
+    try {
+      const b = await res.json();
+      if (b?.detail) detail = String(b.detail);
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, detail);
+  }
+  return (await res.json()) as TrafficSourceResult;
 }
 
 // Studio自社同接CSV: プレビュー（計算＋動画候補。保存しない・要ログイン）。

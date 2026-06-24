@@ -286,3 +286,26 @@ class LatestMetricValue(Base):
     recorded_at = Column(DateTime(timezone=True))
     source = Column(Text)
     source_file = Column(Text)
+
+
+class ChannelTrafficSource(Base):
+    """チャンネル全体の流入経路(トラフィックソース)。006_channel_traffic_sources.sql。
+
+    動画別ではなくチャンネル全体集計。grain は (year_month, source_type, source_key)。
+    source_type: category / external_url / related_video。再投入=置換(upsert)。
+    """
+
+    __tablename__ = "channel_traffic_sources"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, server_default=_GEN_UUID)
+    year_month = Column(Text, nullable=False)  # 'YYYY-MM'
+    source_type = Column(Text, nullable=False)  # category / external_url / related_video
+    source_key = Column(Text, nullable=False)
+    source_name = Column(Text)
+    imp = Column(BigInteger)
+    ctr = Column(Numeric)  # 0〜1
+    view_count = Column(Integer)
+    avg_watch_seconds = Column(Integer)
+    total_watch_hours = Column(Numeric)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=text("now()"))
