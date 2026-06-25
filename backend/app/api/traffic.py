@@ -4,6 +4,7 @@ channel_traffic_sources（チャンネル全体・月単位）を読み取り、
   - source_type='category' を「流入ソース別集計」（視聴回数降順＋構成比%）
   - source_type='related_video' を「関連動画Top」（視聴回数降順 上位10件）
   - source_type='external_url' を「外部サイトTop」（視聴回数降順 上位10件）
+  - source_type='search_term' を「検索キーワードTop」（視聴回数降順 上位10件）
 として返す。スキーマ変更なし（既存テーブルのみ参照）。
 
 備考: 「ライブ配信の関連動画Top」に厳密に相当する「ライブ由来かどうか」の区別は
@@ -21,6 +22,7 @@ from app.models import ChannelTrafficSource
 from app.schemas.traffic import (
     ExternalSiteItem,
     RelatedVideoItem,
+    SearchTermItem,
     TrafficSourceItem,
     TrafficSourcesResponse,
 )
@@ -29,6 +31,7 @@ router = APIRouter(prefix="/traffic-sources", tags=["traffic-sources"])
 
 _RELATED_TOP_N = 10
 _EXTERNAL_TOP_N = 10
+_SEARCH_TOP_N = 10
 
 
 @router.get("", response_model=TrafficSourcesResponse)
@@ -54,6 +57,7 @@ def traffic_sources(
             sources=[],
             related_videos=[],
             external_sites=[],
+            search_terms=[],
         )
 
     # 対象月の決定（未指定・不正値は最新月にフォールバック）。
@@ -139,6 +143,31 @@ def traffic_sources(
         for r in ext_rows
     ]
 
+    # ---- YouTube検索キーワードTop（search_term）: 視聴回数降順 上位N件 ----
+    # 「YouTube検索」流入の内訳（検索語 × 視聴回数）。関連動画Topと同じ集計方法。
+    # データ未投入の月は 0 件（空表示で破綻しない）。
+    search_rows = db.scalars(
+        select(ChannelTrafficSource)
+        .where(
+            ChannelTrafficSource.year_month == target_ym,
+            ChannelTrafficSource.source_type == "search_term",
+        )
+        .order_by(ChannelTrafficSource.view_count.desc().nullslast())
+        .limit(_SEARCH_TOP_N)
+    ).all()
+
+    search_terms = [
+        SearchTermItem(
+            term=r.source_key,
+            view_count=r.view_count,
+            avg_watch_seconds=r.avg_watch_seconds,
+            total_watch_hours=float(r.total_watch_hours)
+            if r.total_watch_hours is not None
+            else None,
+        )
+        for r in search_rows
+    ]
+
     return TrafficSourcesResponse(
         year_month=target_ym,
         available_months=available_months,
@@ -146,4 +175,5 @@ def traffic_sources(
         sources=sources,
         related_videos=related_videos,
         external_sites=external_sites,
+        search_terms=search_terms,
     )

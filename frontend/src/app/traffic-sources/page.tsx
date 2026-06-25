@@ -359,6 +359,50 @@ export default function TrafficSourcesPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* 5. YouTube検索キーワードTop（「YouTube検索」流入の内訳。データがある場合のみ） */}
+          {data.search_terms.length > 0 && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">YouTube検索キーワードTop10</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="mb-3 text-xs text-muted-foreground">
+                  ※ 流入ソース「YouTube検索」の内訳（検索キーワード別の視聴回数）。
+                </p>
+                <div className="overflow-x-auto">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b text-left text-xs text-muted-foreground">
+                        <th className="px-2 py-2 font-medium">#</th>
+                        <th className="px-2 py-2 font-medium">検索キーワード</th>
+                        <th className="px-2 py-2 text-right font-medium">視聴回数</th>
+                        <th className="px-2 py-2 text-right font-medium">平均視聴時間</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.search_terms.map((s, i) => (
+                        <tr key={s.term} className="border-b last:border-0">
+                          <td className="px-2 py-2 tabular-nums text-muted-foreground">
+                            {i + 1}
+                          </td>
+                          <td className="max-w-[460px] px-2 py-2" title={s.term}>
+                            {s.term}
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums">
+                            {formatNumber(s.view_count)}
+                          </td>
+                          <td className="px-2 py-2 text-right tabular-nums">
+                            {formatDuration(s.avg_watch_seconds)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </>
       )}
     </main>

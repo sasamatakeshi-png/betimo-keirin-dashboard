@@ -104,3 +104,55 @@ def parse_external_url_csv(content: bytes, source_type: str = "external_url") ->
 def parse_related_video_csv(content: bytes, source_type: str = "related_video") -> list[dict]:
     """関連動画CSV。source_key=関連動画ID(YT_RELATED. 接頭辞を除去)、source_name=タイトル。"""
     return _parse(content, source_type)
+
+
+def parse_search_term_csv(content: bytes, source_type: str = "search_term") -> list[dict]:
+    """YouTube検索キーワードCSV(トラフィックソース → YouTube検索 のエクスポート)。
+
+    検索語は「ソースのタイトル」列を使う（「トラフィック ソース」列は
+    'YT_SEARCH.<検索語>' 形式のため使わない）。source_key=source_name=検索語。
+    imp/ctr はデータ行が 0 のため取り込まない（視聴回数ベースで扱う）。
+    既存(external_url/related_video)と同じ列構成にマッピングし「合計」行はスキップ。
+    """
+    text = decode_csv_bytes(content)
+    rows = read_rows(text)
+    if not rows:
+        return []
+
+    hl = [h.strip().lower() for h in rows[0]]
+    i_title = find_col(hl, ["ソースのタイトル"])
+    i_src = find_col(hl, ["トラフィック"])  # フォールバック用(YT_SEARCH. 接頭辞を剥がす)
+    i_vc = find_col(hl, ["視聴回数", "再生数"], ("率", "平均", "時間"))
+    i_dur = find_col(hl, ["平均視聴時間"])
+    i_hrs = find_col(hl, ["総再生時間"])
+
+    def cell(row: list[str], idx: int | None) -> str | None:
+        if idx is None or idx >= len(row):
+            return None
+        return row[idx]
+
+    records: list[dict] = []
+    for row in rows[1:]:
+        if not row:
+            continue
+        # 検索語 = ソースのタイトル。空なら「トラフィック ソース」から YT_SEARCH. を剥がす。
+        title_raw = cell(row, i_title)
+        term = title_raw.strip() if title_raw else None
+        if not term:
+            raw_src = (cell(row, i_src) or "").strip()
+            term = raw_src[len("YT_SEARCH."):].strip() if raw_src.startswith("YT_SEARCH.") else raw_src
+        if is_skip_identifier(term):  # 合計/空をスキップ
+            continue
+        records.append(
+            {
+                "source_type": source_type,
+                "source_key": term,
+                "source_name": term,
+                "imp": None,
+                "ctr": None,
+                "view_count": parse_count(cell(row, i_vc)),
+                "avg_watch_seconds": parse_duration_seconds(cell(row, i_dur)),
+                "total_watch_hours": _parse_float(cell(row, i_hrs)),
+            }
+        )
+    return records

@@ -541,6 +541,7 @@ const TRAFFIC_ENDPOINT: Record<TrafficSourceKind, string> = {
   category: "/api/ingestion/traffic-source",
   external_url: "/api/ingestion/external-url",
   related_video: "/api/ingestion/related-video",
+  search_term: "/api/ingestion/search-term",
 };
 
 export async function uploadTrafficSourceCsv(

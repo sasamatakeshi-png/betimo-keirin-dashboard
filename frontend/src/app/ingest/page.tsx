@@ -71,6 +71,7 @@ const TRAFFIC_KIND_OPTIONS: { value: TrafficSourceKind; label: string; hint: str
   { value: "category", label: "流入経路CSV", hint: "大カテゴリ別（ブラウジング機能/YouTube検索/関連動画/外部 等）" },
   { value: "external_url", label: "外部流入CSV", hint: "外部URL別（Google Search/X/betimo.jp 等）" },
   { value: "related_video", label: "関連動画CSV", hint: "関連動画別（YT_RELATED.動画ID → タイトル）" },
+  { value: "search_term", label: "YouTube検索CSV", hint: "検索キーワード別（ソースのタイトル=検索語 → 視聴回数）" },
 ];
 
 const STATUS_BADGE: Record<string, string> = {

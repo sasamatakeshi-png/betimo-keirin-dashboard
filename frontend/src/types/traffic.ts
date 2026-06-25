@@ -27,6 +27,13 @@ export interface ExternalSiteItem {
   total_watch_hours: number | null;
 }
 
+export interface SearchTermItem {
+  term: string; // 検索語
+  view_count: number | null;
+  avg_watch_seconds: number | null;
+  total_watch_hours: number | null;
+}
+
 export interface TrafficSourcesResponse {
   year_month: string | null; // 対象月（データ無しなら null）
   available_months: string[]; // 選択可能な月（昇順）
@@ -34,4 +41,5 @@ export interface TrafficSourcesResponse {
   sources: TrafficSourceItem[]; // 視聴回数の降順
   related_videos: RelatedVideoItem[]; // 視聴回数の降順 上位10件
   external_sites: ExternalSiteItem[]; // 「外部」内訳 視聴回数の降順 上位10件
+  search_terms: SearchTermItem[]; // 「YouTube検索」内訳 視聴回数の降順 上位10件
 }

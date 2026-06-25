@@ -155,6 +155,20 @@ async def upload_related_video(
 
 
 @router.post(
+    "/search-term",
+    response_model=TrafficSourceResult,
+    dependencies=[Depends(get_current_auth)],
+)
+async def upload_search_term(
+    file: UploadFile = File(...),
+    year_month: str = Form(..., description="対象月 'YYYY-MM'"),
+    db: Session = Depends(get_db),
+) -> TrafficSourceResult:
+    """YouTube検索キーワードCSV（検索語別）を channel_traffic_sources へ upsert する。"""
+    return await _upload_traffic(file, year_month, "search_term", db)
+
+
+@router.post(
     "/x-csv",
     response_model=XCsvResult,
     dependencies=[Depends(get_current_auth)],

@@ -17,14 +17,16 @@ from app.models import ChannelTrafficSource, IngestionLog
 from app.services.parsers import (
     parse_external_url_csv,
     parse_related_video_csv,
+    parse_search_term_csv,
     parse_traffic_source_csv,
 )
 
-# source_type → パーサ。API の3エンドポイントから渡される。
+# source_type → パーサ。API の各エンドポイントから渡される。
 _PARSERS = {
     "category": parse_traffic_source_csv,
     "external_url": parse_external_url_csv,
     "related_video": parse_related_video_csv,
+    "search_term": parse_search_term_csv,
 }
 
 _UPSERT_SET_COLS = (

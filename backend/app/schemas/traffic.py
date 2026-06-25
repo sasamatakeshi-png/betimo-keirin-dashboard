@@ -47,6 +47,19 @@ class ExternalSiteItem(BaseModel):
     total_watch_hours: float | None = None
 
 
+class SearchTermItem(BaseModel):
+    """YouTube検索キーワードTop の1件（source_type='search_term'）。
+
+    「YouTube検索」流入の内訳（検索語 × 視聴回数）。term は検索語（source_key）。
+    imp/ctr はデータ無しのため持たない（視聴回数ベース）。
+    """
+
+    term: str  # 検索語（source_key）
+    view_count: int | None = None
+    avg_watch_seconds: int | None = None
+    total_watch_hours: float | None = None
+
+
 class TrafficSourcesResponse(BaseModel):
     """P12 トラフィックソース画面のレスポンス。"""
 
@@ -56,3 +69,4 @@ class TrafficSourcesResponse(BaseModel):
     sources: list[TrafficSourceItem]  # 視聴回数の降順
     related_videos: list[RelatedVideoItem]  # 視聴回数の降順 上位10件
     external_sites: list[ExternalSiteItem]  # 「外部」内訳 視聴回数の降順 上位10件
+    search_terms: list[SearchTermItem]  # 「YouTube検索」内訳 視聴回数の降順 上位10件

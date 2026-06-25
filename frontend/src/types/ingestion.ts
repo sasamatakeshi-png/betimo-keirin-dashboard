@@ -14,7 +14,11 @@ export type MonthlySegment = "all" | "live" | "short";
 export type MonthlyKind = "metrics" | "demographics";
 
 // 流入経路系CSVの種別（API エンドポイントに対応）
-export type TrafficSourceKind = "category" | "external_url" | "related_video";
+export type TrafficSourceKind =
+  | "category"
+  | "external_url"
+  | "related_video"
+  | "search_term";
 
 // POST /api/ingestion/{traffic-source|external-url|related-video} のレスポンス
 export interface TrafficSourceResult {
