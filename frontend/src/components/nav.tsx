@@ -45,6 +45,12 @@ export function Nav() {
             <Link href="/program-comparison" className={linkCls("/program-comparison")}>
               番組比較
             </Link>
+            <Link href="/traffic-sources" className={linkCls("/traffic-sources")}>
+              トラフィックソース
+            </Link>
+            <Link href="/x-analytics" className={linkCls("/x-analytics")}>
+              Xアナリティクス
+            </Link>
             <Link href="/ingest" className={linkCls("/ingest")}>
               取り込み
             </Link>

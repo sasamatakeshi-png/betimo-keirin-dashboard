@@ -18,7 +18,9 @@ from app.api.ingestion import router as ingestion_router
 from app.api.metrics import router as metrics_router
 from app.api.program_comparison import router as program_comparison_router
 from app.api.timeseries import router as timeseries_router
+from app.api.traffic import router as traffic_router
 from app.api.videos import router as videos_router
+from app.api.x_analytics import router as x_analytics_router
 
 app = FastAPI(
     title="Betimo KEIRIN Dashboard API",
@@ -49,6 +51,8 @@ app.include_router(program_comparison_router, prefix="/api")
 app.include_router(timeseries_router, prefix="/api")
 app.include_router(ingestion_router, prefix="/api")
 app.include_router(analysis_router, prefix="/api")
+app.include_router(traffic_router, prefix="/api")
+app.include_router(x_analytics_router, prefix="/api")
 
 
 @app.get("/")

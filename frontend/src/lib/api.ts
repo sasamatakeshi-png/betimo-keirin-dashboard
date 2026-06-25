@@ -17,6 +17,8 @@ import type {
 } from "@/types/dashboard";
 import type { RaceGroup } from "@/types/concurrent";
 import type { EventSummary } from "@/types/event-summary";
+import type { TrafficSourcesResponse } from "@/types/traffic";
+import type { XAnalyticsDailyResponse } from "@/types/x-analytics";
 import type {
   ProgramCandidatesResponse,
   ProgramDetailResponse,
@@ -264,6 +266,28 @@ export function getChannels(): Promise<Page<Channel>> {
 // 同接データを持つレース一覧（競合1社以上の日のみ・日付の新しい順）。認証不要GET。
 export function getConcurrentRaces(): Promise<RaceGroup[]> {
   return apiGet<RaceGroup[]>("/api/concurrent/races");
+}
+
+// トラフィックソース集計（流入ソース別＋関連動画Top。月単位）。認証不要GET。P12。
+// year_month 省略時はサーバ側で最新の利用可能月にフォールバック。
+export function getTrafficSources(
+  yearMonth?: string,
+): Promise<TrafficSourcesResponse> {
+  return apiGet<TrafficSourcesResponse>("/api/traffic-sources", {
+    year_month: yearMonth,
+  });
+}
+
+// X日別アナリティクス（日別＋期間計＋前期間計＋前期間比）。認証不要GET。P14。
+// date_from/date_to 省略時はサーバ側で直近の利用可能範囲（既定28日）にフォールバック。
+export function getXAnalyticsDaily(
+  dateFrom?: string,
+  dateTo?: string,
+): Promise<XAnalyticsDailyResponse> {
+  return apiGet<XAnalyticsDailyResponse>("/api/x-analytics/daily", {
+    date_from: dateFrom,
+    date_to: dateTo,
+  });
 }
 
 export function getEvents(params?: QueryParams): Promise<Page<EventLite>> {
